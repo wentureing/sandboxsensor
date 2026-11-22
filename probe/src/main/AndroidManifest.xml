@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!--
+      探针 APK：无 UI 交互需求，启动即跑全部探针，通过 logcat(tag=PROBE) 输出报告。
+      刻意不引入任何第三方依赖（含 androidx），以保证「直接安装」与「作为 guest 导入容器」
+      两种场景行为一致。
+    -->
+    <application
+        android:name=".ProbeApplication"
+        android:allowBackup="false"
+        android:label="Sandbox Probe"
+        android:supportsRtl="true">
+
+        <!-- initOrder 抬高，确保它在本应用其他 Provider 之前创建（用于验证启动时序） -->
+        <provider
+            android:name=".ProbeProvider"
+            android:authorities="com.sandbox.probe.probe"
+            android:exported="false"
+            android:initOrder="1000" />
+
+        <activity
+            android:name=".ProbeActivity"
+            android:exported="true"
+            android:theme="@android:style/Theme.Material.Light">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+
+</manifest>

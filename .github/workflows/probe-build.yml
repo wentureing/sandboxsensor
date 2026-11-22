@@ -1,0 +1,138 @@
+name: build-probe
+
+# 只构建探针 APK；容器骨架（:app）用另一个 workflow。
+# 触发：手动，或改动探针/构建脚本时自动。
+
+on:
+  workflow_dispatch:
+    inputs:
+      abi:
+        description: '目标 ABI'
+        type: choice
+        options: [arm64-v8a, x86_64, universal]
+        default: arm64-v8a
+  push:
+    branches: [main]
+    paths:
+      - 'probe/**'
+      - 'gradle/**'
+      - 'settings.gradle.kts'
+      - 'build.gradle.kts'
+      - '.github/workflows/probe-build.yml'
+
+permissions:
+  contents: read
+
+# 同一分支重复触发时取消旧任务，避免浪费私有仓库 Actions 额度
+concurrency:
+  group: probe-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # 自建 SDK 根，放在 runner 用户目录下，保证 cache 可读写
+  ANDROID_SDK_ROOT: ${{ github.workspace }}/.android-sdk
+  ANDROID_HOME: ${{ github.workspace }}/.android-sdk
+  GRADLE_VERSION: '8.9'
+  NDK_VERSION: '27.1.12297006'
+  CMAKE_VERSION: '3.22.1'
+  SDK_PLATFORM: 'android-35'
+  BUILD_TOOLS: '35.0.0'
+
+  # ★ 固定缓存键：只 bump 这个值才会让缓存整体失效
+  CACHE_EPOCH: 'v1'
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ---------- 缓存 1：Android SDK 组件（固定 key） ----------
+      - name: Cache Android SDK (fixed key)
+        id: sdk-cache
+        uses: actions/cache@v4
+        with:
+          path: .android-sdk
+          key: sdk-${{ env.SDK_PLATFORM }}-bt${{ env.BUILD_TOOLS }}-ndk${{ env.NDK_VERSION }}-cmake${{ env.CMAKE_VERSION }}-${{ env.CACHE_EPOCH }}
+
+      - name: Install Android SDK components
+        if: steps.sdk-cache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          SDKMAN="$(ls -1 /usr/local/lib/android/sdk/cmdline-tools/*/bin/sdkmanager 2>/dev/null | head -n1 || true)"
+          if [ -z "${SDKMAN:-}" ] || [ ! -x "$SDKMAN" ]; then
+            SDKMAN="$(command -v sdkmanager || true)"
+          fi
+          if [ -z "${SDKMAN:-}" ]; then
+            echo "::error::sdkmanager not found on runner"; exit 1
+          fi
+          echo "using sdkmanager: $SDKMAN"
+          mkdir -p "$ANDROID_SDK_ROOT"
+          yes | "$SDKMAN" --sdk_root="$ANDROID_SDK_ROOT" --licenses > /dev/null 2>&1 || true
+          "$SDKMAN" --sdk_root="$ANDROID_SDK_ROOT" --install \
+            "platforms;${SDK_PLATFORM}" \
+            "build-tools;${BUILD_TOOLS}" \
+            "platform-tools" \
+            "ndk;${NDK_VERSION}" \
+            "cmake;${CMAKE_VERSION}"
+          du -sh "$ANDROID_SDK_ROOT" || true
+
+      # ---------- JDK ----------
+      - name: Setup JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      # ---------- Gradle（固定版本，关闭它自带的缓存） ----------
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: ${{ env.GRADLE_VERSION }}
+          cache-disabled: true
+
+      # ---------- 缓存 2：Gradle home（固定 key） ----------
+      - name: Cache Gradle home (fixed key)
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper/dists
+          key: gradle-home-${{ env.GRADLE_VERSION }}-${{ env.CACHE_EPOCH }}
+
+      - name: Build probe APK
+        env:
+          PROBE_ABI: ${{ inputs.abi || 'arm64-v8a' }}
+        run: |
+          echo "ABI=$PROBE_ABI"
+          # 探针是独立工程，直接构建显式任务
+          gradle :probe:assembleDebug -PprobeAbi="$PROBE_ABI" --no-daemon --stacktrace
+
+      - name: Collect outputs
+        run: |
+          echo "=== APK ==="
+          find probe/build/outputs -name '*.apk' -exec ls -lh {} \;
+          echo "=== native libs (16KB 对齐检查) ==="
+          find probe/build -name 'libprobe.so' -exec ls -lh {} \; || true
+
+      - name: Upload probe APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: probe-debug-apk
+          path: probe/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload build reports
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: probe-build-reports
+          path: |
+            probe/build/reports/**
+            probe/build/outputs/logs/**
+          if-no-files-found: ignore
+          retention-days: 7
