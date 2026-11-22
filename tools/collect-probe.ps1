@@ -37,9 +37,10 @@ $Activity = "$Pkg/.ProbeActivity"
 $adbArgs = @()
 if ($Serial) { $adbArgs += @('-s', $Serial) }
 
+# 用普通函数 + $args（不声明 param）：否则 -W / -d / -s 这类 adb 参数
+# 会被 PowerShell 当成通用参数（-WarningAction 等）而报“参数名称歧义”。
 function Invoke-Adb {
-    param([Parameter(ValueFromRemainingArguments = $true)][string[]]$Args)
-    $all = $adbArgs + $Args
+    $all = $adbArgs + $args
     & adb @all
 }
 

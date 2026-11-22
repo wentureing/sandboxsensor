@@ -121,13 +121,27 @@ jobs:
           echo "=== native libs ==="
           find container -name '*.so' -exec ls -lh {} \; 2>/dev/null | head -n 20 || true
 
+      # 产物体面化：container-<repo>-<sha>.apk，artifact 内不带多级目录
+      - name: Stage artifact
+        id: stage
+        run: |
+          set -euo pipefail
+          SHA="$(echo "$GITHUB_SHA" | cut -c1-7)"
+          mkdir -p out
+          SRC="$(find container -path '*/build/outputs/apk/debug/*.apk' | head -n1 || true)"
+          if [ -n "${SRC:-}" ]; then
+            cp "$SRC" "out/container-shitjumpingvm-${SHA}.apk"
+            echo "path=out/container-shitjumpingvm-${SHA}.apk" >> "$GITHUB_OUTPUT"
+            ls -lh out
+          else
+            echo "::warning::no apk produced"
+          fi
+
       - name: Upload container APK
         uses: actions/upload-artifact@v4
         with:
-          name: container-debug-apk
-          path: |
-            container/app/build/outputs/apk/debug/*.apk
-            container/**/build/outputs/apk/debug/*.apk
+          name: container-apk
+          path: out/*.apk
           if-no-files-found: warn
           retention-days: 30
 

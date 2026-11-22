@@ -45,6 +45,8 @@ jobs:
   probe:
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    env:
+      PROBE_ABI: ${{ inputs.abi || 'arm64-v8a' }}
 
     steps:
       - name: Checkout
@@ -101,26 +103,32 @@ jobs:
           key: gradle-home-${{ env.GRADLE_VERSION }}-${{ env.CACHE_EPOCH }}
 
       - name: Build probe APK
-        env:
-          PROBE_ABI: ${{ inputs.abi || 'arm64-v8a' }}
         run: |
           echo "ABI=$PROBE_ABI"
           # 用 wrapper 构建：Gradle 发行版落在 ~/.gradle/wrapper/dists（已纳入固定 key 缓存）
           chmod +x ./gradlew
           ./gradlew :probe:assembleDebug -PprobeAbi="$PROBE_ABI" --no-daemon --stacktrace
 
-      - name: Collect outputs
+      # 产物体面化：不要 app-debug.apk 这种通用名，也不要在 artifact 里带多级目录
+      - name: Stage artifact
+        id: stage
         run: |
-          echo "=== APK ==="
-          find probe/build/outputs -name '*.apk' -exec ls -lh {} \;
+          set -euo pipefail
+          SHA="$(echo "$GITHUB_SHA" | cut -c1-7)"
+          mkdir -p out
+          SRC="$(ls probe/build/outputs/apk/debug/*.apk | head -n1)"
+          DST="out/probe-${SHA}-${PROBE_ABI}.apk"
+          cp "$SRC" "$DST"
+          echo "path=$DST" >> "$GITHUB_OUTPUT"
+          ls -lh out
           echo "=== native libs (16KB 对齐检查) ==="
           find probe/build -name 'libprobe.so' -exec ls -lh {} \; || true
 
       - name: Upload probe APK
         uses: actions/upload-artifact@v4
         with:
-          name: probe-debug-apk
-          path: probe/build/outputs/apk/debug/*.apk
+          name: probe-apk
+          path: out/*.apk
           if-no-files-found: error
           retention-days: 30
 

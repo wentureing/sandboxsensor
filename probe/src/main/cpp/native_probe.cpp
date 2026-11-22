@@ -224,6 +224,46 @@ Java_com_sandbox_probe_NativeProbe_runAll(JNIEnv* env, jclass /*clazz*/, jstring
         add("N12.syscall_getuid", true, "uid=" + std::to_string(uid));
     }
 
+    // ---- N13 / N14 / N15：另一种等价前缀 /data/user/0/<pkg> ----
+    // 真实设备上 realpath("/data/user/0/x") 会解析成 "/data/data/x"（见 T1 报告 J30），
+    // 因此容器若只映射其中一个前缀，另一个前缀的访问会绕过映射 —— 这三条专门测它。
+    {
+        const std::string user0 = "/data/user/0/" + pkg + "/files";
+        mkdir(user0.c_str(), 0700);
+        const std::string target2 = user0 + "/native_user0.txt";
+        int ufd = open(target2.c_str(), O_CREAT | O_RDWR | O_CLOEXEC, 0600);
+        add("N13.open_user0_prefix", ufd >= 0,
+            ufd >= 0 ? ("fd=" + std::to_string(ufd) + " path=" + target2)
+                     : Errcode("open_user0"));
+        if (ufd >= 0) {
+            char link[512];
+            const std::string p = "/proc/self/fd/" + std::to_string(ufd);
+            ssize_t n = readlink(p.c_str(), link, sizeof(link) - 1);
+            if (n > 0) {
+                link[n] = '\0';
+                add("N14.readlink_user0_fd", true, link);
+            } else {
+                add("N14.readlink_user0_fd", false, Errcode("readlink_user0"));
+            }
+            close(ufd);
+        } else {
+            add("N14.readlink_user0_fd", false, "no fd from N13");
+        }
+    }
+    {
+        const std::string p = "/data/user/0/" + pkg + "/files";
+        struct stat st {};
+        int rc = stat(p.c_str(), &st);
+        if (rc == 0) {
+            char buf[128];
+            snprintf(buf, sizeof(buf), "mode=%o uid=%d dev=%llu", st.st_mode, st.st_uid,
+                     static_cast<unsigned long long>(st.st_dev));
+            add("N15.stat_user0_dir", true, buf);
+        } else {
+            add("N15.stat_user0_dir", false, Errcode("stat_user0"));
+        }
+    }
+
     if (fd >= 0) close(fd);
     return env->NewStringUTF(g_out.c_str());
 }
