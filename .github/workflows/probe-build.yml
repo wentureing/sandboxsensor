@@ -119,6 +119,11 @@ jobs:
           SRC="$(ls probe/build/outputs/apk/debug/*.apk | head -n1)"
           DST="out/probe-${SHA}-${PROBE_ABI}.apk"
           cp "$SRC" "$DST"
+          # 产物约定：文件名必须 .apk 结尾
+          case "$DST" in
+            *.apk) ;;
+            *) echo "::error::artifact must end with .apk: $DST"; exit 1 ;;
+          esac
           echo "path=$DST" >> "$GITHUB_OUTPUT"
           ls -lh out
           echo "=== native libs (16KB 对齐检查) ==="

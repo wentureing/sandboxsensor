@@ -135,6 +135,12 @@ jobs:
           SRC="$(find container -path '*/build/outputs/apk/debug/*.apk' | head -n1 || true)"
           if [ -n "${SRC:-}" ]; then
             cp "$SRC" "out/container-shitjumpingvm-${SHA}.apk"
+            # 产物约定：文件名必须 .apk 结尾
+            DST="out/container-shitjumpingvm-${SHA}.apk"
+            case "$DST" in
+              *.apk) ;;
+              *) echo "::error::artifact must end with .apk: $DST"; exit 1 ;;
+            esac
             echo "path=out/container-shitjumpingvm-${SHA}.apk" >> "$GITHUB_OUTPUT"
             ls -lh out
           else

@@ -106,6 +106,27 @@ python .\tools\diff-report.py probe-reports\report-installed-*.json probe-report
 | `J32–J34` | `java.io` / `SharedPreferences` |
 | `N01–N12` | **libc**：open/stat/access/fopen/**openat 相对路径**/readlink fd/**syscall**/maps 扫描/写操作 |
 
+## 产物约定
+
+**所有构建产物必须是 `.apk` 文件**，且 artifact 内不带多级目录：
+
+| workflow | artifact 名 | 文件名格式 |
+| --- | --- | --- |
+| `build-probe` | `probe-apk` | `probe-<7位sha>-<abi>.apk` |
+| `build-container` | `container-apk` | `container-shitjumpingvm-<7位sha>.apk` |
+
+两个 workflow 的 `Stage artifact` 步骤都有强制校验：
+
+```bash
+case "$DST" in
+  *.apk) ;;
+  *) echo "::error::artifact must end with .apk: $DST"; exit 1 ;;
+esac
+```
+
+> GitHub 的 artifact 下载永远是 `.zip`；解压后应只得到一个 `.apk` 文件。
+> 命名约定：`<类型>-<7位sha>[-<abi>].apk`，禁止 `app-debug.apk` 这类通用名。
+
 ## 已知限制
 
 - 默认只构建 `arm64-v8a`；模拟器需在触发时选 `x86_64` 或 `universal`。
