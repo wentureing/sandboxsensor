@@ -24,6 +24,14 @@ public class ProbeActivity extends Activity {
         super.onCreate(savedInstanceState);
         Report.mark("Activity.onCreate");
 
+        // UI 层探针（uiprobe 大类）：PopupWindow / 子窗口必须在 UI 线程、Activity 存活时测。
+        // 结果暂存在 UiProbe，由 ProbeRunner 合并进报告。
+        try {
+            UiProbe.run(this);
+        } catch (Throwable t) {
+            Log.w("PROBE", "UiProbe failed: " + t);
+        }
+
         new Thread(() -> {
             JSONObject payload;
             try {

@@ -58,6 +58,7 @@ public final class ProbeRunner {
         probeSysProps();   // P17-P19  JVM 系统属性
         probeFd();         // P20-P21  fd 视图（已打开 fd 的真实路径）
         probeMount();      // P22-P23  mountinfo
+        probeUiEntries();  // P24-P27  uiprobe（PopupWindow / 子窗口，来自 UiProbe）
         probeNative();
 
         JSONObject root = new JSONObject();
@@ -561,6 +562,34 @@ public final class ProbeRunner {
             }
             return "sandboxMounts=" + sandbox + " " + sb;
         });
+    }
+
+    /**
+     * 合并 UiProbe 在 UI 线程采到的结果（PopupWindow / 子窗口，uiprobe 大类 P24-P27）。
+     * 必须在 ProbeActivity 里先跑过 UiProbe.run()，否则这里是空的。
+     */
+    private void probeUiEntries() {
+        org.json.JSONArray ui;
+        try {
+            ui = UiProbe.takeEntries();
+        } catch (Throwable t) {
+            put("P24", "uiprobe", "takeEntries", () -> {
+                throw new IllegalStateException("UiProbe.takeEntries failed: " + t);
+            });
+            return;
+        }
+        if (ui == null) {
+            return;
+        }
+        synchronized (entries) {
+            for (int i = 0; i < ui.length(); i++) {
+                try {
+                    entries.put(ui.getJSONObject(i));
+                } catch (Throwable ignored) {
+                    // 单条失败不影响其余
+                }
+            }
+        }
     }
 
     // ------------------------------------------------------------------ native
