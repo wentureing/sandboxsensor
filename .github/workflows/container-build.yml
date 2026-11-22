@@ -1,0 +1,143 @@
+name: build-container
+
+# 构建容器骨架（ShitJumpingVM fork），产出 debug APK 用于 T2 对照组。
+# 不修改 ShitJumpingVM 仓库：由本仓库 checkout 其源码后构建。
+
+on:
+  workflow_dispatch:
+    inputs:
+      repo:
+        description: '容器源码仓库'
+        default: 'wentureing/ShitJumpingVM'
+      ref:
+        description: '分支 / tag / SHA'
+        default: 'main'
+      task:
+        description: 'Gradle 任务'
+        default: ':app:assembleDebug'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/container-build.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: container-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  ANDROID_SDK_ROOT: ${{ github.workspace }}/.android-sdk
+  ANDROID_HOME: ${{ github.workspace }}/.android-sdk
+  NDK_VERSION: '27.1.12297006'
+  CMAKE_VERSION: '3.22.1'
+  SDK_PLATFORM: 'android-35'
+  BUILD_TOOLS: '35.0.0'
+
+  # 与 probe-build.yml 共享同一套固定 key：SDK 缓存可直接复用（~780MB 不必重下）
+  CACHE_EPOCH: 'v1'
+
+jobs:
+  container:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout container source
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.repo || 'wentureing/ShitJumpingVM' }}
+          ref: ${{ inputs.ref || 'main' }}
+          path: container
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Show container revision
+        working-directory: container
+        run: |
+          echo "repo=${{ inputs.repo || 'wentureing/ShitJumpingVM' }}"
+          echo "ref=${{ inputs.ref || 'main' }}"
+          git log --oneline -1 || true
+          echo "--- modules ---"
+          grep -E '^\s*include' settings.gradle.kts || true
+          echo "--- ndk/cmake ---"
+          grep -rE 'ndkVersion|cmake' --include='*.kts' . | head -n 20 || true
+
+      - name: Cache Android SDK (fixed key, shared with probe)
+        id: sdk-cache
+        uses: actions/cache@v4
+        with:
+          path: .android-sdk
+          key: sdk-${{ env.SDK_PLATFORM }}-bt${{ env.BUILD_TOOLS }}-ndk${{ env.NDK_VERSION }}-cmake${{ env.CMAKE_VERSION }}-${{ env.CACHE_EPOCH }}
+          restore-keys: |
+            sdk-${{ env.SDK_PLATFORM }}-bt${{ env.BUILD_TOOLS }}-ndk${{ env.NDK_VERSION }}-cmake${{ env.CMAKE_VERSION }}-
+
+      - name: Install Android SDK components
+        if: steps.sdk-cache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          SDKMAN="$(ls -1 /usr/local/lib/android/sdk/cmdline-tools/*/bin/sdkmanager 2>/dev/null | head -n1 || true)"
+          if [ -z "${SDKMAN:-}" ] || [ ! -x "$SDKMAN" ]; then
+            SDKMAN="$(command -v sdkmanager || true)"
+          fi
+          if [ -z "${SDKMAN:-}" ]; then
+            echo "::error::sdkmanager not found on runner"; exit 1
+          fi
+          mkdir -p "$ANDROID_SDK_ROOT"
+          yes | "$SDKMAN" --sdk_root="$ANDROID_SDK_ROOT" --licenses > /dev/null 2>&1 || true
+          "$SDKMAN" --sdk_root="$ANDROID_SDK_ROOT" --install \
+            "platforms;${SDK_PLATFORM}" \
+            "build-tools;${BUILD_TOOLS}" \
+            "platform-tools" \
+            "ndk;${NDK_VERSION}" \
+            "cmake;${CMAKE_VERSION}"
+
+      - name: Setup JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Cache Gradle home (fixed key, shared with probe)
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper/dists
+          key: gradle-home-8.9-v1
+
+      - name: Build container APK
+        working-directory: container
+        run: |
+          chmod +x ./gradlew
+          ./gradlew ${{ inputs.task || ':app:assembleDebug' }} --no-daemon --stacktrace
+
+      - name: Collect outputs
+        if: always()
+        run: |
+          echo "=== APK ==="
+          find container -name '*.apk' -exec ls -lh {} \; 2>/dev/null || echo "no apk"
+          echo "=== native libs ==="
+          find container -name '*.so' -exec ls -lh {} \; 2>/dev/null | head -n 20 || true
+
+      - name: Upload container APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: container-debug-apk
+          path: |
+            container/app/build/outputs/apk/debug/*.apk
+            container/**/build/outputs/apk/debug/*.apk
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Upload build reports
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: container-build-reports
+          path: |
+            container/**/build/reports/**
+            container/**/build/outputs/logs/**
+          if-no-files-found: ignore
+          retention-days: 7
