@@ -118,7 +118,56 @@ sandboxsensor / 当前容器
 
 **版本线索**：fork 初始提交 `63346e6` 的 subject 是
 `v156: trace the login page load window (LoginActivity first resume, 256MB, 20s, same filter)...`
-—— 说明上游是一个**长期迭代到 v156** 的项目，且有成熟的调试工具链。
+
+### 4.1 提交数与「v156」的真实含义（**更正先前的错误推断**）
+
+| 仓库 | 提交数 | 时间跨度 | size |
+| --- | ---: | --- | ---: |
+| `TanvirHossain2/NEXTVM` | **4** | 2026-03-07（仅一次初始发布 + 3 次 README/资源提交） | 1.7 MB |
+| **`woand/ShitJumpingVM`** | **75** | 2026-03-07 → 2026-11-18 | **83 MB** |
+
+**我此前写错过一次**：看到 commit subject 里的 `v156`，就推断「上游迭代到 v156（156 个提交）」。
+**实际不是**：
+
+- 上游只有 **75 个提交**
+- `v156` 是**开发者自己的内部版本号/迭代编号**，与 git 提交数不同步
+  （75 个提交跨到 v156，说明作者按别的粒度递增，可能是构建号或每轮调试）
+- **教训**：判断提交数必须用 API 计数，不能从 commit message 里的字符串反推
+
+**修正后的结论**：上游是「**75 个提交、约 8 个月、版本号标到 v156**」的项目。
+
+### 4.2 两个仓库的关系
+
+```
+TanvirHossain2/NEXTVM        4 commits,  1.7 MB   ← 2026-03 的初始发布（初始骨架）
+        │ woand fork 后继续开发
+        ▼
+woand/ShitJumpingVM         75 commits, 83 MB     ← 真正的主开发仓库（版本号 v1 → v156）
+        │
+        ▼
+wentureing/ShitJumpingVM    我们 fork 的是 woand 的最新提交（63346e6 = 第 75 个）
+```
+
+**83 MB vs 1.7 MB** 的差距说明：`woand` 在 fork 后做了绝大部分开发，
+`TanvirHossain2/NEXTVM` 只是一个初始骨架。
+
+### 4.3 本地仓库是浅克隆（避免再次误判）
+
+```bash
+$ git rev-list --count HEAD
+9
+$ cat .git/shallow
+63346e6cd233dd2a4e2e424d0b3614660c64f791
+$ git cat-file -p 63346e6 | grep parent
+parent 22f5fc916605a8ef9008facf153f5faaff5b380c
+```
+
+- 本地是**浅克隆**（`.git/shallow` 指向 `63346e6`）
+- `63346e6` **有父提交** `22f5fc9`，但该父提交**不在本地**
+- 本地只能看到 `63346e6` 及其之后的 9 个提交（我们的补丁）
+- **上游的 74 个提交历史在本地不可见**
+
+→ 任何关于「上游提交数/历史长度」的结论，**必须走 GitHub API 计数**，不能看本地 `git log`。
 
 ---
 
