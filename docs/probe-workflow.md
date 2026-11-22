@@ -1,0 +1,126 @@
+# 探针输出在哪、怎么方便看、怎么横向比较
+
+- 更新：2026-11-22
+- 适用：探针 v1.2（`versionCode=3`），检测项清单见 `probe-items-v1.2.md`
+
+---
+
+## 一、输出一共有三个通道（按可靠性排序）
+
+| # | 通道 | 位置 | 特点 |
+| --- | --- | --- | --- |
+| 1 | **logcat（主通道）** | tag **`PROBE`**，分块 base64：`REPORT v1 part N/M <b64>`、`EARLY v1 part N/M <b64>` | 不依赖 run-as、不依赖包是否安装；包被卸载后作为 guest 导入容器也能采到 |
+| 2 | **JSON 文件（备份）** | `<filesDir>/probe-report.json` | 结构最完整，便于脚本处理 |
+| 3 | **PHASE 标记** | logcat tag `PROBE`：`PHASE <phase> uptime=… pid=… process=…` | 定位「报告卡在哪个阶段」 |
+
+### `<filesDir>` 在不同环境下的实际路径
+
+| 场景 | filesDir |
+| --- | --- |
+| **直接安装** | `/data/user/0/com.sandbox.probe/files/probe-report.json` |
+| **本项目的容器（com.nextvm.app）** | `/data/user/0/com.nextvm.app/files/virtual/data/com.sandbox.probe_<ts>/files/probe-report.json` |
+| **其他多开/虚拟化产品** | 各自的沙箱目录，用下面的「路径探测」方式定位 |
+
+> 因为路径随产品而异，**优先用 logcat 通道**，不要依赖路径。
+
+---
+
+## 二、一次采集的标准流程（每个环境跑一遍）
+
+### 步骤 1：抓 logcat（不发 `-c`，避免丢证据）
+
+```powershell
+adb -s 10AFA8169Z0039G logcat -d -b all -v threadtime > probe-reports\run-<环境名>.txt
+```
+
+如果环境里探针还没跑过，先触发一次（直接点图标，或在容器里点卡片启动）。
+
+### 步骤 2：从 logcat 还原 JSON
+
+```powershell
+python tools/extract-report.py probe-reports\run-<环境名>.txt
+# 产出: probe-reports\report-<环境名>-1.json / early-<环境名>-1.json
+```
+
+### 步骤 3：（可选）拿文件版 JSON
+
+```powershell
+# 直接安装
+adb shell run-as com.sandbox.probe cat files/probe-report.json > probe-reports\file-<环境名>.json
+
+# 容器内（需要知道 sandbox 目录名）
+adb shell "run-as com.nextvm.app sh -c 'ls files/virtual/data/'"
+adb shell "run-as com.nextvm.app cat files/virtual/data/<instance>/files/probe-report.json" > probe-reports\file-<环境名>.json
+```
+
+### 一键脚本
+
+```powershell
+.\tools\collect-probe.ps1 -Mode installed    # 直接安装环境
+.\tools\collect-probe.ps1 -Mode container    # 容器环境
+```
+
+> `collect-probe.ps1` 带复位守卫：不带 `-Reset` 不会 force-stop / 清日志 / 卸载。
+
+---
+
+## 三、横向比较多种虚拟环境（新工具）
+
+```powershell
+python tools/probe-matrix.py 报告1.json 报告2.json 报告3.json -o probe-reports\matrix.md
+```
+
+### 输出示例
+
+```markdown
+| ID | 大类 | 检测项 | installed | container | 差异 |
+| --- | --- | --- | --- | --- | --- |
+| `P03` | procstat | same-uid process count | myUid=10123 count=1 | myUid=10306 count=4 | **●** |
+| `P05` | maps | host pkg hits in maps | lines=880 hostHits=0 | lines=1021 hostHits=17 | **●** |
+| `P12` | soload | System.load(abs) | loaded=/data/app/.../libprobe.so | UnsatisfiedLinkError | **●** |
+```
+
+### 参数
+
+| 参数 | 用途 |
+| --- | --- |
+| `-o <file>` | 写 markdown 文件（不传则打印到 stdout） |
+| `--only-diff` | 只输出环境间取值不同的项 ← **对比时最常用** |
+| `--name 列名` | 覆盖列名（默认取报告里的 `mode` 字段），可重复 |
+| `--width N` | 单元格最大宽度（默认 48） |
+
+### 典型比较组合
+
+| 比较 | 命令 |
+| --- | --- |
+| 基线 vs 本项目容器 | `probe-matrix.py report-installed-1.json report-container-1.json --only-diff` |
+| 本项目 vs 其他多开产品 | `probe-matrix.py report-installed-1.json report-ours.json report-other.json --only-diff` |
+| 同一容器改版前后 | `probe-matrix.py report-p15.json report-p16.json --only-diff --name p15 --name p16` |
+
+---
+
+## 四、工具清单
+
+| 工具 | 作用 |
+| --- | --- |
+| `tools/extract-report.py <logcat.txt>` | logcat → JSON（处理 base64 分块、可能乱序） |
+| `tools/probe-matrix.py <a.json> <b.json> …` | **多环境矩阵表**（新增） |
+| `tools/diff-report.py <a.json> <b.json>` | 两份报告的逐项 diff（命令行视图） |
+| `tools/make-record.py <json>` | 生成 `docs/records/*.md` 归档记录 |
+| `tools/collect-probe.ps1 -Mode installed\|container` | 触发 + 采集（带复位守卫） |
+| `tools/auto-test.ps1` | 端到端自动测试（带复位守卫） |
+
+---
+
+## 五、看报告时的优先级
+
+新探针里有几项是**必然暴露**的，比较时先看它们：
+
+| 项 | 期望（干净环境） | 容器内的典型值 |
+| --- | --- | --- |
+| `P05` hostHits | **0** | > 0（maps 里有 `com.nextvm.app`） |
+| `P03` count | **1** | > 3（host + 多个 `:pN`） |
+| `P02` cmdline | `com.sandbox.probe` | `com.nextvm.app:p0` |
+| `P12` soload | `loaded=...` | 可能 `UnsatisfiedLinkError` |
+| `P17` java.class.path | 不含宿主 | 含 `com.nextvm.app` |
+| `P21` fd targets | 自己 data 目录 | `files/virtual/...` |
