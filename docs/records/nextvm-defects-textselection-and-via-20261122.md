@@ -337,4 +337,113 @@ WebView 的库未 patch（NS_HOOK_SYSTEM_LIBS=0）
 
 **关键提醒**：改动 1 会**推翻 p13/p15 的 `NS_HOOK_SYSTEM_LIBS=0` 保守策略**。建议做成**精确白名单**（只放行 `libwebviewchromium*`），而不是把 `NS_HOOK_SYSTEM_LIBS` 整体打开。
 
+---
+
+## 九、修正：缺陷 1 是**长按特有**，与缺陷 2 **独立**（2026-11-22 20:19–20:23）
+
+### 9.1 关键对照实验
+
+| 操作 | 进程是否存活 | 是否新增 ANR |
+| --- | --- | --- |
+| **普通点击** `input tap 400 800` | ✅ 存活（pid 20772） | ❌ 无 |
+| **滑动滚动** `input swipe 540 1600 540 800 400` | ✅ 存活 | ❌ 无 |
+| **长按** `input motionevent DOWN 300 500` +1200ms `UP` | ❌ **被杀** | ✅ **每次必现** |
+
+→ **只有长按触发**。普通点击与滚动完全正常。
+
+**这推翻了 §8.4「两个缺陷同源」的推断**：缺陷 1 与 WebView 的 MIME 问题**无关**，是长按路径特有的。
+
+### 9.2 完整生命周期时间线（一次长按实验）
+
+```
+20:21:57.852  VAMS: Started activity: mark.via.Shell → com.nextvm.app.stub.P0$Standard03
+20:21:58.495  wm_on_create_called:  mark.via.Shell
+20:21:58.543  wm_on_resume_called:  mark.via.Shell
+20:21:58.594  input_focus: Focus request Window mark.via/mark.via.Shell
+20:21:58.631  input_focus: Focus entering mark.via/mark.via.Shell
+20:22:17.389  input_interaction: [Gesture Monitor]（此前的正常交互）
+   ...        ← 长按发生在这里
+20:22:58.703  am_anr: Input dispatching timed out (mark.via/mark.via.Shell)
+20:23:09.518  wm_finish_activity: [stub P0$Standard03] **user-terminated**
+20:23:09.546  input_focus: Focus leaving ... reason=NO_WINDOW
+20:23:09.565  wm_on_resume_called: com.nextvm.app.MainActivity   ← 退回容器
+```
+
+**要点**：
+- Via 的窗口从创建到 ANR 前**一直存在**，焦点也正常
+- ANR 后 **10.8 秒**固定被终止，原因 `user-terminated` / `am_kill ... user request after error`
+- **这是 vivo ROM 的自动行为**（ANR 对话框超时后自动关闭），不是用户点的
+
+### 9.3 为什么拿不到主线程栈（已确认是硬限制）
+
+```
+$ adb shell run-as com.nextvm.app kill -0 20772
+kill: bad pid '20772': Permission denied          ← SELinux: runas_app 域
+
+$ adb shell kill -0 20772
+/system/bin/sh: kill: 20772: Operation not permitted   ← 不同 uid
+```
+
+- `run-as` 切到的是 **`u:r:runas_app:s0`** 域，**无权向 `u:r:untrusted_app` 域（guest 进程）发信号**
+- `bugreport` 里的 8 份 `anr_*` **全部没有 p0 进程段**——`debuggerd` dump 时同样被挡
+- `/data/anr/anr_*` 是 `system:system 0600`，shell 读不了
+
+**结论：在这台 vivo 上，主线程 Java 栈拿不到。** 只能靠 `dumpsys activity lastanr` 的 Reason 字段 + 行为对照实验来定位。
+
+### 9.4 现在的确定结论
+
+| 项 | 结论 | 证据 |
+| --- | --- | --- |
+| 触发条件 | **仅长按** | 点击/滑动正常，长按必 ANR |
+| 表现 | ANR 5 秒 → 10.8 秒后被系统终止 | `am_anr` + `am_kill user request after error` |
+| 窗口状态 | 正常（创建、焦点、存活） | `wm_on_*` + `input_focus` |
+| 缺陷 2 关系 | **独立** | 超时与 MIME 无关 |
+| 主线程栈 | 拿不到 | SELinux `runas_app` 限制 |
+
+### 9.5 剩下的最可能原因（按可能性排序）
+
+长按在 Android 里会走一条**普通点击不会走**的路径：
+
+```
+MotionEvent.ACTION_DOWN (长按超时)
+  → View.performLongClick()
+    → WebView 的 LongClick 处理（AwContents）
+      → 文本选择：startSelectionActionMode
+        → Editor / TextActionModeCallback
+          → FloatingActionMode  ← 一个 PopupWindow
+            → WindowManager.addView(TYPE_APPLICATION_ATTACHED_DIALOG)
+```
+
+| # | 可能断点 | 为什么可能 |
+| --- | --- | --- |
+| **A** | `FloatingActionMode` 的 popup 窗口加不上（容器 WindowManager 代理不处理子窗口类型） | 与之前 `dumpsys window` 里从未出现过 popup 一致 |
+| **B** | 长按触发的 Binder 回调（`IActivityManager` / `IWindowManager`）在容器代理层阻塞 | 容器替换了这两个服务 |
+| **C** | WebView 的 `HandleView`（选择手柄）需要额外 Surface | 未见 popup 窗口出现 |
+
+### 9.6 下一步（需要更早抓窗口）
+
+**我上次抓窗口的时机错了**：长按后 2 秒抓，实际那时窗口已被 finish（20:23:09）。
+
+正确时机：**长按后 0.5–1 秒**（ANR 前）：
+
+```powershell
+adb shell "input motionevent DOWN 300 500"; Start-Sleep -Milliseconds 1200
+adb shell "input motionevent UP 300 500"
+Start-Sleep -Milliseconds 500
+adb -s 10AFA8169Z0039G shell "dumpsys window windows" > win-early.txt
+# 找：有没有 type=2/3/1000-1003/2008 的窗口出现并卡住
+```
+
+**判据**：
+- 若出现 `TYPE_APPLICATION_ATTACHED_DIALOG` 窗口但状态异常 → **断点 A**
+- 若完全没有新窗口 → 长按处理在更早的环节就卡住（B/C）
+
+### 9.7 修复方向的初步判断
+
+| 若确认是断点 A | 修 `WindowManager` 代理，让 `TYPE_APPLICATION_ATTACHED_DIALOG` 用 stub Activity 的 token 正常透传 |
+| --- | --- |
+| 若确认是断点 B | 检查容器的 `IActivityManager`/`IWindowManager` 代理是否有同步 Binder 调用阻塞主线程 |
+| 兜底方案 | 给 guest 的 TextView/WebView 设置自定义 `ActionMode.Callback`，改用**非 popup** 的传统 ActionMode（牺牲体验换稳定） |
+
+
 
