@@ -1,0 +1,147 @@
+// NEXTVM 核心类图
+// 节点面积 ∝ 类代码行数；边 A -> B 表示「A 需要 B」；边宽 ∝ 引用次数
+// 渲染：dot -Tpng core-classes.dot -o core-classes.png
+
+digraph NEXTVM_Core {
+  graph [
+    rankdir=LR
+    bgcolor="#fbfbfd"
+    fontname="Microsoft YaHei"
+    fontsize=22
+    label="NEXTVM 核心类图（节点面积∝代码行数，边宽∝引用次数）\nA -> B 表示 A 需要 B"
+    labelloc="t"
+    pad=0.4
+    nodesep=0.55
+    ranksep=1.1
+    splines=spline
+  ];
+
+  node [
+    shape=box
+    style="rounded,filled"
+    penwidth=2
+    fontname="Microsoft YaHei"
+    fontsize=13
+    fixedsize=true
+  ];
+
+  edge [
+    color="#5a6b8c"
+    arrowsize=0.9
+    fontname="Microsoft YaHei"
+    fontsize=10
+    fontcolor="#44506b"
+  ];
+
+  // ------------------------------------------------------------------
+  // 中枢层：VirtualEngine 出度 11
+  // ------------------------------------------------------------------
+  VirtualEngine [
+    label="VirtualEngine\n1978 行 / 50 函数\n（中枢：出度 11）"
+    width=3.0 height=1.5
+    fillcolor="#cfe3ff" color="#3d6fb5"
+  ];
+
+  // ------------------------------------------------------------------
+  // 超大类（面积最大）
+  // ------------------------------------------------------------------
+  VirtualApplicationManager [
+    label="VirtualApplicationManager\n3924 行 / 51 函数\n（最大类）"
+    width=4.2 height=1.9
+    fillcolor="#ffe0d0" color="#c46a3a"
+  ];
+  SystemServiceProxyManager [
+    label="SystemServiceProxyManager\n3242 行 / 143 函数"
+    width=3.9 height=1.8
+    fillcolor="#e2f7e2" color="#3f8a4a"
+  ];
+  ActivityThreadHook [
+    label="ActivityThreadHook\n2088 行 / 36 函数（含 3 类）"
+    width=3.2 height=1.5
+    fillcolor="#ffe8a8" color="#a8871e"
+  ];
+  ActivityManagerProxy [
+    label="ActivityManagerProxy\n1258 行 / 33 函数"
+    width=2.7 height=1.3
+    fillcolor="#e2f7e2" color="#3f8a4a"
+  ];
+  VirtualResourceManager [
+    label="VirtualResourceManager\n1016 行 / 30 函数"
+    width=2.5 height=1.2
+    fillcolor="#e2f7e2" color="#3f8a4a"
+  ];
+  NativeHookBridge [
+    label="NativeHookBridge\n939 行 / 47 函数"
+    width=2.4 height=1.2
+    fillcolor="#efe0ff" color="#7347a8"
+  ];
+  VirtualMultiProcessManager [
+    label="VirtualMultiProcessManager\n905 行 / 48 函数（含 6 类）"
+    width=2.4 height=1.2
+    fillcolor="#e2f7e2" color="#3f8a4a"
+  ];
+  PackageManagerProxy [
+    label="PackageManagerProxy\n820 行 / 29 函数"
+    width=2.2 height=1.1
+    fillcolor="#e2f7e2" color="#3f8a4a"
+  ];
+  VirtualWindowManager [
+    label="VirtualWindowManager\n765 行 / 39 函数"
+    width=2.1 height=1.1
+    fillcolor="#e2f7e2" color="#3f8a4a"
+  ];
+  SandboxManager [
+    label="SandboxManager\n349 行 / 27 函数"
+    width=1.5 height=0.9
+    fillcolor="#fff2c8" color="#a8871e"
+  ];
+  StubRegistry [
+    label="StubRegistry\n156 行 / 9 函数"
+    width=1.1 height=0.7
+    fillcolor="#e2f7e2" color="#3f8a4a"
+  ];
+
+  // ------------------------------------------------------------------
+  // 边：A -> B 表示 A 需要 B，penwidth 按引用次数
+  // ------------------------------------------------------------------
+  // VirtualEngine 的全部出边（中枢）
+  VirtualEngine -> StubRegistry               [penwidth=3.2 label="7"]
+  VirtualEngine -> ActivityThreadHook         [penwidth=3.0 label="6"]
+  VirtualEngine -> VirtualResourceManager     [penwidth=2.8 label="5"]
+  VirtualEngine -> SystemServiceProxyManager  [penwidth=2.6 label="4"]
+  VirtualEngine -> VirtualApplicationManager  [penwidth=2.4 label="3"]
+  VirtualEngine -> VirtualMultiProcessManager [penwidth=2.4 label="3"]
+  VirtualEngine -> VirtualWindowManager       [penwidth=2.4 label="3"]
+  VirtualEngine -> NativeHookBridge           [penwidth=2.4 label="3"]
+  VirtualEngine -> SandboxManager             [penwidth=2.4 label="3"]
+  VirtualEngine -> PackageManagerProxy        [penwidth=2.0 label="2"]
+  VirtualEngine -> ActivityManagerProxy       [penwidth=1.6 label="1"]
+
+  // 其余依赖
+  VirtualApplicationManager -> NativeHookBridge       [penwidth=3.0 label="6" color="#c46a3a"]
+  VirtualApplicationManager -> ActivityManagerProxy   [penwidth=2.4 label="3" color="#c46a3a"]
+  VirtualApplicationManager -> VirtualResourceManager [penwidth=2.0 label="2" color="#c46a3a"]
+  VirtualApplicationManager -> ActivityThreadHook     [penwidth=1.6 label="1" color="#c46a3a" style=dashed]
+
+  ActivityThreadHook -> PackageManagerProxy  [penwidth=1.6 label="1"]
+  ActivityThreadHook -> StubRegistry         [penwidth=1.6 label="1"]
+  VirtualWindowManager -> SystemServiceProxyManager [penwidth=2.0 label="2"]
+
+  // 回指（说明存在双向，标注为虚线）
+  SystemServiceProxyManager -> VirtualEngine [penwidth=2.4 label="3" style=dashed color="#8a8a8a"]
+  ActivityManagerProxy -> VirtualEngine      [penwidth=2.0 label="2" style=dashed color="#8a8a8a"]
+  NativeHookBridge -> VirtualEngine          [penwidth=1.6 label="1" style=dashed color="#8a8a8a"]
+  PackageManagerProxy -> VirtualEngine       [penwidth=1.6 label="1" style=dashed color="#8a8a8a"]
+
+  // ------------------------------------------------------------------
+  // 图例
+  // ------------------------------------------------------------------
+  subgraph cluster_legend {
+    label="图例"
+    fontsize=14
+    style="rounded,dashed"
+    color="#aaa"
+    node [shape=plaintext fontsize=12]
+    L1 [label="实线 = 单向依赖    虚线 = 回指（存在双向）\n节点面积 ∝ 类行数    边宽 ∝ 引用次数"]
+  }
+}

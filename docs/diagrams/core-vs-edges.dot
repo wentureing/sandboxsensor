@@ -1,0 +1,114 @@
+// NEXTVM 核心 vs 边缘
+// 把 12 个核心类折叠成一个整体，展示它与 UI / 探针 / 系统 / guest 的关系
+// 渲染：dot -Tpng core-vs-edges.dot -o core-vs-edges.png
+
+digraph NEXTVM_Edges {
+  graph [
+    rankdir=LR
+    bgcolor="#fbfbfd"
+    fontname="Microsoft YaHei"
+    fontsize=20
+    label="NEXTVM：核心整体与边缘部分的关系\n箭头 = 需要/调用/依赖方向，粗线 = 强依赖"
+    labelloc="t"
+    pad=0.5
+    nodesep=0.7
+    ranksep=1.4
+    compound=true
+  ];
+
+  node [
+    style="rounded,filled"
+    penwidth=2
+    fontname="Microsoft YaHei"
+    fontsize=13
+  ];
+  edge [
+    color="#5a6b8c"
+    fontname="Microsoft YaHei"
+    fontsize=10
+    fontcolor="#44506b"
+  ];
+
+  // ================= 边缘：上层 UI =================
+  subgraph cluster_ui {
+    label="UI 层（feature/*）"
+    fontsize=13
+    style="rounded,filled"
+    fillcolor="#f2f4fb"
+    color="#b8c2dd"
+
+    App        [label="app\nMainActivity / CmdReceiver\n1147 行" fillcolor="#fdf0d5" color="#c9a227"]
+    Launcher   [label="feature:launcher\n759 行"   fillcolor="#fdf0d5" color="#c9a227"]
+    AppManager [label="feature:appmanager\n1054 行" fillcolor="#fdf0d5" color="#c9a227"]
+    Settings   [label="feature:settings\n1275 行"  fillcolor="#fdf0d5" color="#c9a227"]
+    FileMgr    [label="feature:filemanager\n2242 行" fillcolor="#fdf0d5" color="#c9a227"]
+    DesignSys  [label="core:designsystem\n155 行"   fillcolor="#f5f5f5" color="#999"]
+  }
+
+  // ================= 核心（折叠为一个整体）=================
+  Core [
+    shape=box
+    style="rounded,filled"
+    fillcolor="#cfe3ff"
+    color="#3d6fb5"
+    penwidth=3
+    fontsize=20
+    label=<<B>NEXTVM 核心（12 类 / 约 18.4k 行）</B><BR/><BR/>
+      VirtualEngine（中枢，出度 11）<BR/>
+      VirtualApplicationManager（3924 行）<BR/>
+      SystemServiceProxyManager（3242 行 / 143 函数）<BR/>
+      ActivityThreadHook（2088 行）<BR/>
+      ActivityManagerProxy / VirtualResourceManager<BR/>
+      NativeHookBridge / VirtualMultiProcessManager<BR/>
+      PackageManagerProxy / VirtualWindowManager<BR/>
+      SandboxManager / StubRegistry>
+    width=6.2 height=4.6
+    fixedsize=true
+  ];
+
+  // ================= 边缘：系统性支撑 =================
+  subgraph cluster_sup {
+    label="系统与服务"
+    fontsize=13
+    style="rounded,filled"
+    fillcolor="#eef8ee"
+    color="#a8cda8"
+
+    Native  [label="native-hook.cpp\n6458 行\n（GOT hook / 路径重定向）" fillcolor="#efe0ff" color="#7347a8"]
+    Binder  [label="core:binder\n7517 行\n（AMS/PMS 代理）"               fillcolor="#e2f7e2" color="#3f8a4a"]
+    Serv    [label="core:services\n8523 行\n（VPMS/VAMS 实现）"            fillcolor="#e2f7e2" color="#3f8a4a"]
+    Fw      [label="core:framework\n1556 行\n（APK 解析 / LoadedApk）"     fillcolor="#e2f7e2" color="#3f8a4a"]
+  }
+
+  // ================= 边缘：外部实体 =================
+  Guest   [label="Guest App\n（mark.via / com.sandbox.probe …）" shape=box style="rounded,filled" fillcolor="#ffe0d0" color="#c46a3a" width=2.6 height=0.9 fixedsize=true]
+  Android [label="Android Framework\n（AMS / PMS / WMS / WebView）" shape=box style="rounded,filled" fillcolor="#e8e8e8" color="#888" width=2.8 height=0.9 fixedsize=true]
+  Probe   [label="com.sandbox.probe\n（探针，独立 APK）" shape=box style="rounded,filled" fillcolor="#fff2c8" color="#a8871e" width=2.4 height=0.8 fixedsize=true]
+
+  // ================= 关系 =================
+  // UI -> 核心
+  App        -> Core [penwidth=3.0 label="持有引擎"]
+  Launcher   -> Core [penwidth=2.6 label="列表/启动"]
+  AppManager -> Core [penwidth=2.8 label="安装/卸载"]
+  Settings   -> Core [penwidth=2.4 label="配置"]
+  FileMgr    -> Core [penwidth=2.0 label="文件浏览"]
+  Launcher   -> DesignSys [penwidth=1.4 style=dotted]
+  AppManager -> DesignSys [penwidth=1.4 style=dotted]
+  Settings   -> DesignSys [penwidth=1.4 style=dotted]
+  FileMgr    -> DesignSys [penwidth=1.4 style=dotted]
+
+  // 核心 -> 支撑
+  Core -> Native [penwidth=3.0 label="GOT/PLT hook"]
+  Core -> Binder [penwidth=2.8 label="AMS/PMS 代理"]
+  Core -> Serv   [penwidth=2.8 label="VPMS/VAMS"]
+  Core -> Fw     [penwidth=2.4 label="APK 解析"]
+
+  // 核心 <-> guest / android
+  Core -> Guest   [penwidth=3.0 label="拉起进程/注入 ClassLoader"]
+  Core -> Android [penwidth=2.8 label="hook 系统服务"]
+  Android -> Guest [penwidth=1.6 style=dashed label="IPC"]
+
+  // 探针：跑在 guest 内，测量核心行为
+  Probe -> Android [penwidth=1.4 style=dotted label="调用 API"]
+  Guest -> Probe   [penwidth=1.6 style=dotted label="承载"]
+}

@@ -45,3 +45,9 @@ probe-reports/
 # ---- 系统 ----
 .DS_Store
 Thumbs.db
+
+# ---- 图表产物（可由 docs/diagrams/*.dot 重新生成，不入库）----
+docs/diagrams/*.png
+docs/diagrams/*.svg
+docs/diagrams/*.pdf
+docs/diagrams/*.gv.pdf
