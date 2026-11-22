@@ -1,0 +1,255 @@
+# NEXTVM 工程体检报告
+
+- 日期：2026-11-22
+- 对象：`_ref/ShitJumpingVM`（容器骨架，HEAD `a528e09`）
+- 目的：依赖/内聚/代码量/文件职责/权限的客观盘点（**本次不改代码**）
+
+---
+
+## 一、依赖方向
+
+### 1.1 模块分层（15 个模块）
+
+```
+                    ┌─────────┐
+                    │   app   │  依赖 14 个模块
+                    └────┬────┘
+        ┌────────────────┼────────────────┐
+        ▼                ▼                ▼
+ ┌────────────┐  ┌────────────┐  ┌────────────┐
+ │ feature/*  │  │ core:      │  │ core:      │
+ │ (4 个)     │  │ virtuali-  │  │ services   │
+ │            │  │ zation     │  │            │
+ └─────┬──────┘  └─────┬──────┘  └─────┬──────┘
+       │               │               │
+       └───────────────┼───────────────┘
+                       ▼
+        ┌──────────────┴──────────────┐
+        ▼              ▼              ▼
+ ┌──────────┐  ┌──────────┐  ┌──────────┐
+ │core:hook │  │core:bind │  │core:apk  │
+ │          │  │er        │  │          │
+ └────┬─────┘  └────┬─────┘  └────┬─────┘
+      │             │             │
+      └─────────────┼─────────────┘
+                    ▼
+        ┌───────────┴───────────┐
+        ▼                       ▼
+ ┌──────────────┐      ┌──────────────┐
+ │ core:model   │      │ core:common  │   （无 project 依赖）
+ └──────────────┘      └──────────────┘
+```
+
+### 1.2 依赖数量（按模块）
+
+| 模块 | project 依赖数 | 备注 |
+| --- | ---: | --- |
+| `app` | **14** | 依赖全部（编排层，合理） |
+| `core:virtualization` | **8** | 聚合层 |
+| `core:services` | 5 | |
+| `core:binder` | 5 | |
+| `feature:appmanager` | 5 | |
+| `feature:settings` | 5 | |
+| `feature:launcher` | 4 | |
+| `feature:filemanager` | 3 | |
+| `core:apk` / `framework` / `hook` / `sandbox` | 2 | 只依赖 model+common |
+| `core:model` / `common` / `designsystem` | 0~1 | 叶子 |
+
+### 1.3 循环依赖检查
+
+**无循环依赖。** 分层清晰：`common/model` → 基础设施 → 聚合 → UI → app。
+
+### 1.4 一个值得讨论的点
+
+**`feature/*` 直接依赖 `core:virtualization`**：
+
+```
+feature:launcher    → core:virtualization
+feature:appmanager  → core:virtualization
+feature:settings    → core:virtualization
+```
+
+UI 层直接调 `VirtualEngine`（`AppManagerViewModel` 里 `engine.installApp(...)`）。
+
+**判断**：
+- 对当前规模（UI 只有 4 个模块、引擎是唯一实现）**可以接受**；
+- 但如果以后要换引擎实现或加多引擎，UI 会被绑死。理想做法是 `feature` 只依赖一个 `:core:interfaces` 抽象。
+
+**建议**：暂不动，记入"若做架构演进"清单。
+
+---
+
+## 二、代码量
+
+### 2.1 总量
+
+| 项 | 值 |
+| --- | --- |
+| 文件 | **98 个**（.kt + .java + .cpp/.h） |
+| 行数 | **50,534 行** |
+
+### 2.2 按模块
+
+| 模块 | 文件 | 行数 | 占比 |
+| --- | ---: | ---: | ---: |
+| `core:virtualization` | 17 | **14,090** | 28% |
+| `core:hook` | 5 | **9,062** | 18% |
+| `core:services` | 17 | **8,523** | 17% |
+| `core:binder` | 10 | **7,517** | 15% |
+| `feature:filemanager` | 9 | 2,242 | 4% |
+| `core:framework` | 10 | 1,556 | 3% |
+| `core:sandbox` | 4 | 1,519 | 3% |
+| `feature:settings` | 3 | 1,275 | 3% |
+| `app` | 7 | 1,147 | 2% |
+| `feature:appmanager` | 2 | 1,054 | 2% |
+| `feature:launcher` | 2 | 759 | 2% |
+| `core:apk` | 2 | 731 | 1% |
+| `core:model` | 7 | 486 | 1% |
+| `core:common` | 2 | 418 | 1% |
+| `core:designsystem` | 1 | 155 | 0% |
+
+**前 4 个 core 模块占 78%** —— 引擎复杂度集中在这里，符合预期。
+
+### 2.3 超大文件（**这是最突出的问题**）
+
+| 文件 | 行数 | 类数 | 函数数 | 平均行/函数 |
+| --- | ---: | ---: | ---: | ---: |
+| `native-hook.cpp` | **6,458** | — | — | — |
+| `VirtualApplicationManager.kt` | **4,309** | 1 | 21 | **205** |
+| `SystemServiceProxyManager.kt` | **3,273** | 1 | 20 | **164** |
+| `ActivityThreadHook.kt` | **2,133** | 3 | 4 | 533 |
+| `VirtualEngine.kt` | **2,050** | 1 | 31 | 66 |
+| `ActivityManagerProxy.kt` | 1,295 | 1 | 8 | 162 |
+| `VirtualResourceManager.kt` | 1,069 | 1 | 17 | 63 |
+| `NativeHookBridge.kt` | 975 | 2 | 41 | 24 |
+| `VirtualMultiProcessManager.kt` | 947 | **6** | 40 | 24 |
+| `PackageManagerProxy.kt` | 850 | 1 | 4 | **213** |
+
+**三个维度的信号**：
+
+1. **单文件超长**：`native-hook.cpp` 6,458 行、`VirtualApplicationManager.kt` 4,309 行
+2. **单函数超大**：`PackageManagerProxy.kt` 平均 213 行/函数、`VirtualApplicationManager.kt` 205 行/函数
+3. **单文件多类**：`VirtualMultiProcessManager.kt` 6 个类、`ContentResolverProxy.kt` 6 个类、`ActivityThreadHook.kt` 3 个类
+
+---
+
+## 三、内聚性分析（按文件职责）
+
+### 3.1 职责混杂的文件
+
+| 文件 | 观察到的问题 |
+| --- | --- |
+| `VirtualApplicationManager.kt`（4,309 行） | 主类在 **L386**，说明前面 385 行还有其它内容；21 个函数承载 4.3k 行 |
+| `SystemServiceProxyManager.kt`（3,273 行） | 20 个函数 / 3.2k 行；大概率把"多个系统服务的代理"塞在一个类里（Package/Activity/Window/Content…） |
+| `native-hook.cpp`（6,458 行） | 路径重定向 + hook 实现 + /proc 伪造 + 快照诊断 + JNI 桥 全在一个文件 |
+| `ActivityThreadHook.kt`（2,133 行，3 类） | `ActivityThreadHook` + `NextVmInstrumentation` + `ProcessKillGuard` 同文件 |
+
+**判断**：这些文件的内聚性**偏低**（一个文件承担多个职责），但因为它们是引擎核心，拆分有回归风险。
+
+### 3.2 相对健康的模块
+
+| 模块 | 观察 |
+| --- | --- |
+| `core:model`（7 文件 / 486 行） | 纯数据类，内聚好 |
+| `core:common`（2 文件 / 418 行） | 工具类，内聚好 |
+| `core:sandbox`（4 文件 / 1,519 行） | 职责集中（沙箱路径） |
+| `feature:launcher`（2 文件 / 759 行） | UI 拆分合理 |
+
+### 3.3 定义 vs 使用
+
+| 类 | 定义 | 引用 | 判断 |
+| --- | ---: | ---: | --- |
+| `VirtualApp` | 1 | 96 | ✅ 核心数据类 |
+| `VirtualEngine` | 1 | 37 | ✅ 门面 |
+| `SandboxManager` | 1 | 40 | ✅ |
+| `BinderProxyManager` | 1 | 17 | ✅ |
+| `StubRegistry` | 1 | 16 | ✅ |
+| `ActivityThreadHook` | 1 | 15 | ✅ |
+| `VirtualClassLoader` | 1 | 6 | ✅ 偏少但合理（只在创建时用） |
+
+**未发现"定义后完全没引用"的死代码**（早前一次统计里 `VirtualPackageManager` 报 0 是正则误判，实际全仓库出现 23 次）。
+
+---
+
+## 四、存储权限现状与建议
+
+### 4.1 现状
+
+```xml
+<uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
+<uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
+<uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" ... />
+<uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" ... />
+```
+
+另有约 25 个 normal-protection 权限（`USE_BIOMETRIC`、`NFC`、`VIBRATE` 等），注释说明是**为了让 guest 请求这些权限时能直接拿到**（v66 的设计）。
+
+### 4.2 关于"文件和文档"
+
+需要澄清一个概念：**Android 里没有名为"文件和文档"的独立权限**。
+
+你在 Android 15 设置页看到的三个分类，对应的权限是：
+
+| 设置页分类 | 实际权限 | 类型 |
+| --- | --- | --- |
+| 照片和视频 | `READ_MEDIA_IMAGES` / `READ_MEDIA_VIDEO` | 运行时（Android 13+） |
+| 音乐和音频 | `READ_MEDIA_AUDIO` | 运行时（Android 13+） |
+| **文件和文档** | **`MANAGE_EXTERNAL_STORAGE`**（All files access） | 特殊，需跳设置页授权 |
+
+**换句话说**：你现在用的"管理所有文件"就是"文件和文档"。它们不是两个不同的东西——**"文件和文档"是 `MANAGE_EXTERNAL_STORAGE` 在设置页的显示名**。
+
+### 4.3 真正可优化的是补上细粒度媒体权限
+
+| 建议 | 理由 |
+| --- | --- |
+| **保留** `MANAGE_EXTERNAL_STORAGE` | guest 里读写任意文件的场景（下载、文件管理器类应用）离不开它 |
+| **新增** `READ_MEDIA_IMAGES` / `READ_MEDIA_VIDEO` / `READ_MEDIA_AUDIO` | Android 13+ 的 guest 请求媒体权限时，容器需要有对应权限才可能授予；只声明 `MANAGE_EXTERNAL_STORAGE` 时，部分应用会认为"没有照片权限" |
+| **可保留** `READ/WRITE_EXTERNAL_STORAGE` | Android 12 及以下仍需要；用 `maxSdkVersion="32"` 限定更规范 |
+
+**这不是"缩小权限"，而是"补齐 Android 13+ 的新权限"**——因为权限模型变了，旧的两个权限在 13+ 是空操作。
+
+### 4.4 一个必须注意的副作用
+
+权限声明会显示在应用商店/系统设置里。补 `READ_MEDIA_*` 会让权限列表更长，但对**guest 兼容性**是正向的。
+
+---
+
+## 五、Android 12 能装不能跑 guest Via（初步判断，待日志确认）
+
+| 可能原因 | 依据 | 验证方式 |
+| --- | --- | --- |
+| **WebView 权限模型差异** | Android 12 上 `file://` 访问 `/sdcard` 被 SELinux 拒绝（你已实测 denied） | 抓 `logcat` 找 `avc: denied` / `file://` 请求失败 |
+| **WebView 版本较旧** | 容器 targetSdk=35，但 Android 12 的 WebView 可能不支持某些 API | `dumpsys webviewupdate` 看版本 |
+| **`MANAGE_EXTERNAL_STORAGE` 在 12 上行为不同** | 12 上该权限的授权路径/限制与 15 不同 | 检查是否已授权（`appops get`） |
+| **容器代码用了 13+ API** | `minSdk=30`，但代码里可能有 `@RequiresApi(33)` 调用没做版本判断 | 静态扫描 + 抓 `NoSuchMethodError` / `ClassNotFoundException` |
+
+**没有日志前无法定论**。下次在 Android 12 上失败时，抓这三样最有价值：
+
+```bash
+adb logcat -d -b all | Select-String "nextvm|avc: denied|FATAL|NoSuchMethod|ClassNotFound"
+adb shell dumpsys webviewupdate | Select-Object -First 12
+adb shell appops get com.nextvm.app MANAGE_EXTERNAL_STORAGE
+```
+
+---
+
+## 六、体检结论汇总
+
+| 维度 | 结论 | 严重度 |
+| --- | --- | --- |
+| **依赖方向** | 分层清晰、**无循环依赖** | ✅ 健康 |
+| **依赖数量** | `app` 14 个、`virtualization` 8 个，符合编排层/聚合层定位 | ✅ 合理 |
+| **内聚性** | 4 个超大文件（`native-hook.cpp` 6.5k、`VirtualApplicationManager` 4.3k、`SystemServiceProxyManager` 3.3k、`ActivityThreadHook` 2.1k）职责混杂 | ⚠️ **需关注** |
+| **单函数大小** | `PackageManagerProxy` 平均 213 行/函数、`VirtualApplicationManager` 205 行/函数 | ⚠️ 需关注 |
+| **多类文件** | `VirtualMultiProcessManager`(6)、`ContentResolverProxy`(6)、`ActivityThreadHook`(3) | ⚠️ 轻微 |
+| **死代码** | 未发现 | ✅ |
+| **代码量** | 50,534 行 / 98 文件；前 4 个 core 模块占 78% | ✅ 合理（引擎本就复杂） |
+| **权限** | 存储权限概念需要澄清（"文件和文档"= `MANAGE_EXTERNAL_STORAGE`）；**建议补 `READ_MEDIA_*`** | ⚠️ 建议补齐 |
+
+### 最值得做的三件事（按性价比）
+
+1. **补 `READ_MEDIA_IMAGES/VIDEO/AUDIO`**（改 manifest 几行，提升 Android 13+ guest 兼容性）
+2. **拆 `native-hook.cpp`**（6,458 行 → 按 `redirect` / `hook_impl` / `proc_spoof` / `jni` 分文件；纯机械拆分，风险可控）
+3. **拆 `SystemServiceProxyManager.kt`**（3,273 行 → 按服务类型拆；中等风险）
+
+**不建议动**：`VirtualApplicationManager.kt` 和 `ActivityThreadHook.kt`（核心逻辑，拆分回归成本高，且当前功能正常）。
