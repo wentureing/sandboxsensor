@@ -40,7 +40,7 @@ env:
   BUILD_TOOLS: '35.0.0'
 
   # 与 probe-build.yml 共享同一套固定 key：SDK 缓存可直接复用（~780MB 不必重下）
-  CACHE_EPOCH: 'v1'
+  CACHE_EPOCH: 'v2'
 
 jobs:
   container:
@@ -109,7 +109,7 @@ jobs:
           path: |
             ~/.gradle/caches
             ~/.gradle/wrapper/dists
-          key: gradle-home-8.9-v1
+          key: gradle-home-8.9-v2
 
       - name: Build container APK
         working-directory: container
