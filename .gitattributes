@@ -1,0 +1,20 @@
+# 统一换行符：仓库内一律 LF，避免 Linux runner 上出现 bad interpreter
+* text=auto eol=lf
+
+# shell / gradle wrapper 必须 LF
+*.sh   text eol=lf
+gradlew text eol=lf
+
+# Windows 批处理必须 CRLF
+*.bat     text eol=crlf
+gradlew.bat text eol=crlf
+
+# 二进制：不做任何转换
+*.jar   binary
+*.apk   binary
+*.aar   binary
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.webp  binary
+*.zip   binary

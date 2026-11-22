@@ -57,6 +57,10 @@ jobs:
         with:
           path: .android-sdk
           key: sdk-${{ env.SDK_PLATFORM }}-bt${{ env.BUILD_TOOLS }}-ndk${{ env.NDK_VERSION }}-cmake${{ env.CMAKE_VERSION }}-${{ env.CACHE_EPOCH }}
+          # 前缀回退：bump CACHE_EPOCH 后仍复用旧缓存。
+          # 部分命中时 cache-hit=false，下面的安装步骤会自动补装差量，然后保存新 key。
+          restore-keys: |
+            sdk-${{ env.SDK_PLATFORM }}-bt${{ env.BUILD_TOOLS }}-ndk${{ env.NDK_VERSION }}-cmake${{ env.CMAKE_VERSION }}-
 
       - name: Install Android SDK components
         if: steps.sdk-cache.outputs.cache-hit != 'true'
@@ -87,13 +91,6 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      # ---------- Gradle（固定版本，关闭它自带的缓存） ----------
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: ${{ env.GRADLE_VERSION }}
-          cache-disabled: true
-
       # ---------- 缓存 2：Gradle home（固定 key） ----------
       - name: Cache Gradle home (fixed key)
         uses: actions/cache@v4
@@ -108,8 +105,9 @@ jobs:
           PROBE_ABI: ${{ inputs.abi || 'arm64-v8a' }}
         run: |
           echo "ABI=$PROBE_ABI"
-          # 探针是独立工程，直接构建显式任务
-          gradle :probe:assembleDebug -PprobeAbi="$PROBE_ABI" --no-daemon --stacktrace
+          # 用 wrapper 构建：Gradle 发行版落在 ~/.gradle/wrapper/dists（已纳入固定 key 缓存）
+          chmod +x ./gradlew
+          ./gradlew :probe:assembleDebug -PprobeAbi="$PROBE_ABI" --no-daemon --stacktrace
 
       - name: Collect outputs
         run: |
