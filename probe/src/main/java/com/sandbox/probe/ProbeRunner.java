@@ -386,7 +386,11 @@ public final class ProbeRunner {
      */
     private void probeSoLoad() {
         put("P09", "soload", "findLibrary(probe)", () -> {
-            String found = getClass().getClassLoader().findLibrary("probe");
+            // ClassLoader.findLibrary(String) 是 protected，必须反射调用
+            java.lang.reflect.Method m =
+                    ClassLoader.class.getDeclaredMethod("findLibrary", String.class);
+            m.setAccessible(true);
+            Object found = m.invoke(getClass().getClassLoader(), "probe");
             return String.valueOf(found);
         });
         put("P10", "soload", "mapLibraryName", () -> System.mapLibraryName("probe"));
