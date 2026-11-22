@@ -107,7 +107,7 @@ public final class Report {
         }
     }
 
-    /** 输出报告：文件 + 分块 base64 logcat。 */
+    /** 输出报告：内部文件 + 外部文件 + 分块 base64 logcat。 */
     public static void flush(Context ctx, JSONObject payload) {
         String json = payload.toString();
 
@@ -119,6 +119,30 @@ public final class Report {
             Log.i(TAG, "FILE " + f.getAbsolutePath() + " bytes=" + json.length());
         } catch (Throwable t) {
             Log.w(TAG, "file write failed: " + t);
+        }
+
+        // 外部存储副通道（v1.3）：
+        // 容器通常把 guest 的外部存储映射到一个宿主任意可读的路径
+        // （例：AppHider/Gaia -> /sdcard/Android/data/<容器>/gaia/<pkg>/Android/data/<pkg>/files/），
+        // 而内部 getFilesDir() 落在容器私有目录，release 版无 run-as 时取不到。
+        // 因此这里额外写一份到 getExternalFilesDir(null)，让 adb pull 可以直接拿到。
+        // 注意：getExternalFilesDir 不需要任何权限（属于应用自己的外部目录）。
+        try {
+            File ext = ctx.getExternalFilesDir(null);
+            if (ext != null) {
+                if (!ext.exists()) {
+                    ext.mkdirs();
+                }
+                File ef = new File(ext, "probe-report.json");
+                try (FileOutputStream fos = new FileOutputStream(ef)) {
+                    fos.write(json.getBytes(StandardCharsets.UTF_8));
+                }
+                Log.i(TAG, "FILE_EXT " + ef.getAbsolutePath() + " bytes=" + json.length());
+            } else {
+                Log.i(TAG, "FILE_EXT null (getExternalFilesDir returned null)");
+            }
+        } catch (Throwable t) {
+            Log.w(TAG, "external file write failed: " + t);
         }
 
         try {
@@ -160,6 +184,22 @@ public final class Report {
             File f = new File(ctx.getFilesDir(), "probe-early.json");
             try (FileOutputStream fos = new FileOutputStream(f)) {
                 fos.write(json.getBytes(StandardCharsets.UTF_8));
+            }
+            // 外部存储副通道（v1.3），理由同 flush()
+            try {
+                File ext = ctx.getExternalFilesDir(null);
+                if (ext != null) {
+                    if (!ext.exists()) {
+                        ext.mkdirs();
+                    }
+                    File ef = new File(ext, "probe-early.json");
+                    try (FileOutputStream fos = new FileOutputStream(ef)) {
+                        fos.write(json.getBytes(StandardCharsets.UTF_8));
+                    }
+                    Log.i(TAG, "FILE_EXT " + ef.getAbsolutePath() + " bytes=" + json.length());
+                }
+            } catch (Throwable t) {
+                Log.w(TAG, "external early write failed: " + t);
             }
             // 同时走 logcat：容器内 files 目录在宿主机不易定位，logcat 更容易捞
             String b64 = Base64.encodeToString(json.getBytes(StandardCharsets.UTF_8), Base64.NO_WRAP);
