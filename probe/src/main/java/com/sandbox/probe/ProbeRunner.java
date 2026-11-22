@@ -299,7 +299,19 @@ public final class ProbeRunner {
                             nameLine = l.trim();
                         }
                     }
-                    if (uidLine != null && uidLine.indexOf(" " + myUid + " ") > 0) {
+                    // /proc/<pid>/status 的 Uid 行是 tab 分隔：`Uid:\t10309\t10309...`
+                    // 用空白分割后逐字段比较，否则 indexOf(" <uid> ") 永远匹配不到。
+                    boolean uidMatch = false;
+                    if (uidLine != null) {
+                        String[] f = uidLine.split("\\s+");
+                        for (int i = 1; i < f.length; i++) {
+                            if (String.valueOf(myUid).equals(f[i])) {
+                                uidMatch = true;
+                                break;
+                            }
+                        }
+                    }
+                    if (uidMatch) {
                         count++;
                         if (names.length() < 140) {
                             names.append(nameLine).append(";");
@@ -598,12 +610,18 @@ public final class ProbeRunner {
     }
 
     private static String readText(File f, int max) throws Exception {
-        byte[] buf = new byte[max];
-        int n;
+        // 必须循环读：单次 read() 对 /proc/self/maps 这类大文件会截断
+        // （实测只读到 32 行，实际几百行），会让 P05/P06 的统计完全失真。
+        java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
+        byte[] buf = new byte[8192];
         try (FileInputStream fis = new FileInputStream(f)) {
-            n = fis.read(buf);
+            int n;
+            while (bos.size() < max && (n = fis.read(buf)) > 0) {
+                bos.write(buf, 0, Math.min(n, max - bos.size()));
+            }
         }
-        return new String(buf, 0, Math.max(n, 0), "UTF-8").trim();
+        byte[] all = bos.toByteArray();
+        return new String(all, 0, all.length, "UTF-8").trim();
     }
 
     /** 自动判断当前是「直接安装」还是「容器内」。 */
