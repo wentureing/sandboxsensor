@@ -31,7 +31,7 @@ for p in FILES:
     o = s
 
     n_round = len(ROUND.findall(s))
-    s = ROUND.sub("RectangleShape", s)
+    s = ROUND.sub("RoundedCornerShape(0.dp)", s)
 
     n_shadow = len(SHADOW.findall(s))
     s = SHADOW.sub("", s)
@@ -39,13 +39,13 @@ for p in FILES:
     if s == o:
         continue
 
-    if n_round and "import androidx.compose.foundation.shape.RectangleShape" not in s:
+    if n_round and "import androidx.compose.foundation.shape.RoundedCornerShape" not in s:
         s = s.replace(
             "import androidx.compose.foundation.shape.RoundedCornerShape",
-            "import androidx.compose.foundation.shape.RectangleShape",
+            "import androidx.compose.foundation.shape.RoundedCornerShape",
             1,
         )
-        if "import androidx.compose.foundation.shape.RectangleShape" not in s:
+        if "import androidx.compose.foundation.shape.RoundedCornerShape" not in s:
             # 没有 RoundedCornerShape import 可换，插到第一个 import 之后
             m = re.search(r"^import .+$", s, re.M)
             if m:
