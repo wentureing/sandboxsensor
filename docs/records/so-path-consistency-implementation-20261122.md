@@ -215,3 +215,91 @@ int hooked_open(const char* path, int flags, ...) {
 **结论**：
 > 优先做阶段 A（虚路径 + 翻译），它解决"字面量路径 SDK 兼容"这个确定性问题；
 > 阶段 B（maps 伪造）只在明确有检测对抗需求时再做，因为它的复杂度与风险都在前者的 2–3 倍。
+
+---
+
+## 7. 重要反例：从 memfd 加载 SO 在 Android 上失败
+
+来源：用户提供的 `dist/questions77921799.txt`（StackOverflow #77921799，2024-02）
+
+### 7.1 那个问题的做法与结果
+
+```c
+int fd = syscall(SYS_memfd_create, "lib", 0);
+write(fd, elf_buf, elf.size);
+sprintf(load_path, "/proc/self/fd/%d", fd);
+System.load(load_path);           // 失败
+```
+
+```
+java.lang.UnsatisfiedLinkError: dlopen failed: library "/proc/self/fd/76" not found
+```
+
+`dlopen("/proc/self/fd/76")` 直接返回 NULL，`dlerror` 同一条消息。
+
+### 7.2 为什么失败（Android 与桌面 Linux 的关键差异）
+
+| 原因 | 说明 |
+| --- | --- |
+| **linker namespace 白名单** | Android 的 `classloader-namespace` 只允许加载特定目录（`/data/app/*/lib`、`/vendor/lib`、`/system/lib` 等）。`/proc/self/fd/*` 不在允许列表，`open_library` 直接拒绝 |
+| **fd 生命周期** | 若 `memfd` 未带 `MFD_CLOEXEC` 处理不当，或 Java 层 `System.load` 触发 GC/其他线程关闭 fd，路径会立刻失效 |
+| **`/proc/self/fd/N` 是符号链接** | linker 在 namespace 校验阶段会 `realpath`，解析结果是 `/memfd:lib (deleted)`，既不在白名单也不含 `.so` 后缀 |
+| **官方立场** | Android 明确不支持"从内存加载 native 库"，这是加固/防注入策略的一部分 |
+
+> 桌面 Linux 上 `x-c3ll.github.io/posts/fileless-memfd_create` 的 fileless 技巧成立，但 **Android 的 linker 做了额外限制**，不能照搬。
+
+### 7.3 对我们的 B1 方案意味着什么
+
+**好消息：我们不受这个限制影响。**
+
+该问题失败的根本原因是"**文件不在磁盘上**"。而 B1 的方案里，SO **始终是磁盘上的真实文件**，只是路径字符串被映射：
+
+```
+guest 看到的：  /data/user/0/<guest_pkg>/lib/arm64/libx.so
+物理存在的：    /data/user/0/com.nextvm.app/files/virtual/data/<inst>/lib/arm64/libx.so
+```
+
+`dlopen` 拿到的虚路径 → 我们的 `open/openat` hook 翻译成实路径 → linker 正常 `mmap` 真实文件。
+
+**但引出三个必须验证的点**：
+
+| # | 风险 | 验证方法 |
+| --- | --- | --- |
+| 1 | linker 是否在 `open` 之前就对路径做 namespace 校验？如果它先 `realpath` 虚路径，会得到 ENOENT | 用探针 `System.load("/data/user/0/<fake>/lib/arm64/libprobe.so")` 实测 |
+| 2 | linker 会不会绕过我们的 `open` hook（直接用 `openat` + 特殊 flag）？ | 在 hook 里加日志，看 `dlopen` 时是否有对应调用 |
+| 3 | `librarySearchPath` 里的虚路径，是否会被 linker 校验为"不在 namespace" | 同上测试 |
+
+### 7.4 推荐的探针验证（在动手做阶段 A 之前）
+
+新增两项探针，直接在容器里跑：
+
+```java
+// J37: 用"虚拟路径"加载 SO，验证 open hook 是否被 linker 走到
+try {
+    System.load("/data/user/0/com.example.fake/lib/arm64/libprobe.so");
+    report("J37.load_virtual_path", PASS, "loaded");
+} catch (Throwable t) {
+    report("J37.load_virtual_path", FAIL, t.toString());
+}
+
+// J38: 读 /proc/self/maps，看 SO 的显示路径
+// （同时验证第 3 层 maps 伪造的必要性）
+```
+
+判据：
+- `J37` PASS → 阶段 A 的路径翻译对 linker 有效，B1 可做
+- `J37` FAIL 且错误是 `library not found` → linker 在校验阶段就拒绝了虚路径，需要另找办法（例如 `android_dlopen_ext` + `ANDROID_DLEXT_USE_LIBRARY_FD` 传真实 fd，但那样 maps 又会暴露真实路径）
+
+### 7.5 一个可能绕过 linker 校验的备选（记录备查）
+
+`android_dlopen_ext` 支持 `ANDROID_DLEXT_USE_LIBRARY_FD`：
+
+```c
+android_dlextinfo info = { .flags = ANDROID_DLEXT_USE_LIBRARY_FD, .library_fd = real_fd };
+void* h = android_dlopen_ext("libx.so", RTLD_NOW, &info);
+```
+
+- **优点**：直接传真实 fd，linker 不校验路径
+- **缺点**：`maps` 里显示的是 fd 对应的真实 inode 路径 → 仍然暴露，需要第 3 层伪造
+- **用途**：如果阶段 A 被 linker 拦住，这是可行退路
+
