@@ -50,6 +50,14 @@ public final class ProbeRunner {
         probeCanonical();
         probeJavaIo();
         probeDevice();
+        // ---- 新增 7 个大类（与上面 10 类维度互不重叠）----
+        probeProcStat();   // P01-P04  /proc 进程与 UID 视角
+        probeMaps();       // P05-P08  maps 内容分析
+        probeSoLoad();     // P09-P12  SO 加载链路（验证 B1）
+        probeCrossPkg();   // P13-P16  跨包可见性 / 逃逸面
+        probeSysProps();   // P17-P19  JVM 系统属性
+        probeFd();         // P20-P21  fd 视图（已打开 fd 的真实路径）
+        probeMount();      // P22-P23  mountinfo
         probeNative();
 
         JSONObject root = new JSONObject();
@@ -223,6 +231,320 @@ public final class ProbeRunner {
         });
         put("J36", "device", "supported 64bit abis",
                 () -> String.join(",", Build.SUPPORTED_64_BIT_ABIS));
+    }
+
+    // ------------------------------------------------- proc/uid 视角（新大类）
+
+    /**
+     * 新大类 #1：/proc 的进程与 UID 视角。
+     * 与既有 identity 类的区别：identity 走 Java API（Process.myUid），
+     * 这里直接读内核 /proc 文件，能看到「容器没有代理到的地方」。
+     */
+    private void probeProcStat() {
+        put("P01", "procstat", "/proc/self/status Uid/Gid", () -> {
+            StringBuilder sb = new StringBuilder();
+            for (String line : readText(new File("/proc/self/status"), 8192).split("\n")) {
+                if (line.startsWith("Uid:") || line.startsWith("Gid:")
+                        || line.startsWith("Groups:") || line.startsWith("NSpid:")) {
+                    sb.append(line.trim().replaceAll("\\s+", " ")).append(" | ");
+                }
+            }
+            return sb.toString();
+        });
+        put("P02", "procstat", "/proc/self/cmdline", () -> {
+            byte[] b = new byte[512];
+            int n;
+            try (FileInputStream fis = new FileInputStream("/proc/self/cmdline")) {
+                n = fis.read(b);
+            }
+            if (n <= 0) {
+                return "empty";
+            }
+            StringBuilder sb = new StringBuilder();
+            for (int i = 0; i < n; i++) {
+                char c = (char) (b[i] & 0xff);
+                sb.append(c == '\0' ? ' ' : c);
+            }
+            return sb.toString().trim();
+        });
+        put("P03", "procstat", "same-uid process count", () -> {
+            // 对应公开检测手段 1（AntiVirtualApp：ps | grep <uid_name>）
+            int myUid = Process.myUid();
+            int count = 0;
+            StringBuilder names = new StringBuilder();
+            File[] procs = new File("/proc").listFiles();
+            if (procs == null) {
+                return "cannot list /proc";
+            }
+            for (File p : procs) {
+                String pid = p.getName();
+                boolean numeric = pid.length() > 0;
+                for (int i = 0; i < pid.length(); i++) {
+                    if (pid.charAt(i) < '0' || pid.charAt(i) > '9') {
+                        numeric = false;
+                        break;
+                    }
+                }
+                if (!numeric) {
+                    continue;
+                }
+                try {
+                    String st = readText(new File(p, "status"), 2048);
+                    String uidLine = null;
+                    String nameLine = null;
+                    for (String l : st.split("\n")) {
+                        if (l.startsWith("Uid:")) {
+                            uidLine = l.trim();
+                        } else if (l.startsWith("Name:")) {
+                            nameLine = l.trim();
+                        }
+                    }
+                    if (uidLine != null && uidLine.indexOf(" " + myUid + " ") > 0) {
+                        count++;
+                        if (names.length() < 140) {
+                            names.append(nameLine).append(";");
+                        }
+                    }
+                } catch (Throwable ignore) {
+                    // 其他进程的 status 可能不可读，忽略
+                }
+            }
+            return "myUid=" + myUid + " count=" + count + " names=" + names;
+        });
+        put("P04", "procstat", "/proc/self/task thread count", () -> {
+            File task = new File("/proc/self/task");
+            String[] list = task.list();
+            return "threads=" + (list == null ? -1 : list.length);
+        });
+    }
+
+    // -------------------------------------------------- maps 内容（新大类）
+
+    /**
+     * 新大类 #2：/proc/self/maps 的「内容」而不是「可读性」。
+     * native 的 N10 只验证能读到 maps；这里分析内容暴露了什么。
+     */
+    private void probeMaps() {
+        put("P05", "maps", "host pkg hits in maps", () -> {
+            String maps = readText(new File("/proc/self/maps"), 1 << 20);
+            int total = 0;
+            int hostHit = 0;
+            int sandboxHit = 0;
+            for (String line : maps.split("\n")) {
+                if (line.isEmpty()) {
+                    continue;
+                }
+                total++;
+                if (line.contains("com.nextvm.app")) {
+                    hostHit++;
+                }
+                if (line.contains("/virtual/")) {
+                    sandboxHit++;
+                }
+            }
+            return "lines=" + total + " hostHits=" + hostHit + " sandboxHits=" + sandboxHit;
+        });
+        put("P06", "maps", "so paths sample", () -> {
+            String maps = readText(new File("/proc/self/maps"), 1 << 20);
+            StringBuilder sb = new StringBuilder();
+            int shown = 0;
+            for (String line : maps.split("\n")) {
+                int idx = line.indexOf('/');
+                if (idx < 0) {
+                    continue;
+                }
+                String path = line.substring(idx).trim();
+                if (!path.endsWith(".so")) {
+                    continue;
+                }
+                if (sb.length() > 0) {
+                    sb.append(" ;; ");
+                }
+                sb.append(path);
+                if (++shown >= 4) {
+                    break;
+                }
+            }
+            return sb.length() == 0 ? "none" : sb.toString();
+        });
+        put("P07", "maps", "readlink /proc/self/exe", () -> {
+            File exe = new File("/proc/self/exe");
+            return exe.getCanonicalPath();
+        });
+        put("P08", "maps", "smaps readable", () -> {
+            File smaps = new File("/proc/self/smaps");
+            boolean canRead = smaps.canRead();
+            String head = canRead ? readText(smaps, 200) : "";
+            return "canRead=" + canRead + " headLen=" + head.length();
+        });
+    }
+
+    // ------------------------------------------------ SO 加载链路（新大类）
+
+    /**
+     * 新大类 #3：SO 加载链路，用于验证 B1（虚路径方案）。
+     */
+    private void probeSoLoad() {
+        put("P09", "soload", "findLibrary(probe)", () -> {
+            String found = getClass().getClassLoader().findLibrary("probe");
+            return String.valueOf(found);
+        });
+        put("P10", "soload", "mapLibraryName", () -> System.mapLibraryName("probe"));
+        put("P11", "soload", "nativeLibraryDir exists", () -> {
+            String p = ctx.getApplicationInfo().nativeLibraryDir;
+            File d = p == null ? null : new File(p);
+            String[] list = d == null ? null : d.list();
+            return p + " exists=" + (d != null && d.exists())
+                    + " files=" + (list == null ? -1 : list.length);
+        });
+        put("P12", "soload", "System.load(own so by abs path)", () -> {
+            // 用 nativeLibraryDir 拼出真实 so 的绝对路径再 load，
+            // 验证「绝对路径 dlopen」这条路在容器里是否可用（B1 的前置条件）。
+            String dir = ctx.getApplicationInfo().nativeLibraryDir;
+            if (dir == null) {
+                return "nativeLibraryDir=null";
+            }
+            File so = new File(dir, "libprobe.so");
+            if (!so.exists()) {
+                return "libprobe.so missing in " + dir;
+            }
+            System.load(so.getAbsolutePath());
+            return "loaded=" + so.getAbsolutePath();
+        });
+    }
+
+    // -------------------------------------------- 跨包可见性（新大类）
+
+    /**
+     * 新大类 #4：从容器内能看见多少「不该看见」的东西。
+     * 这是逃逸面的直接测量，与 literal 类（自己的路径）完全不同。
+     */
+    private void probeCrossPkg() {
+        put("P13", "crosspkg", "host package visible via PM", () -> {
+            try {
+                ctx.getPackageManager().getPackageInfo("com.nextvm.app", 0);
+                return "visible";
+            } catch (Throwable t) {
+                return "hidden: " + t.getClass().getSimpleName();
+            }
+        });
+        put("P14", "crosspkg", "installedPackages contains host", () -> {
+            List<android.content.pm.PackageInfo> all =
+                    ctx.getPackageManager().getInstalledPackages(0);
+            int hostCount = 0;
+            for (android.content.pm.PackageInfo pi : all) {
+                if (pi.packageName != null && pi.packageName.contains("nextvm")) {
+                    hostCount++;
+                }
+            }
+            return "total=" + all.size() + " hostEntries=" + hostCount;
+        });
+        put("P15", "crosspkg", "/data/data listable", () -> {
+            File d = new File("/data/data");
+            String[] names = d.list();
+            return "canList=" + (names != null) + " count=" + (names == null ? -1 : names.length);
+        });
+        put("P16", "crosspkg", "stat host data dir", () -> {
+            File host = new File("/data/data/com.nextvm.app");
+            return "exists=" + host.exists() + " canRead=" + host.canRead();
+        });
+    }
+
+    // --------------------------------------- Java 系统属性（新大类）
+
+    /**
+     * 新大类 #5：JVM 系统属性。容器会改 Context/文件，但经常忘记改这些，
+     * 它们是「一行 println 就能暴露宿主」的典型。
+     */
+    private void probeSysProps() {
+        put("P17", "prop", "java.class.path", () -> System.getProperty("java.class.path"));
+        put("P18", "prop", "java.library.path", () -> {
+            String v = System.getProperty("java.library.path");
+            return v == null ? "null" : (v.length() > 300 ? v.substring(0, 300) + "..." : v);
+        });
+        put("P19", "prop", "java.vm.name + user.dir", () ->
+                "vm=" + System.getProperty("java.vm.name")
+                        + " userDir=" + System.getProperty("user.dir"));
+    }
+
+    // ------------------------------------------ fd 视图（新大类）
+
+    /**
+     * 新大类 #6：/proc/self/fd。打开的 fd 指向的真实路径，
+     * 是「路径翻译是否彻底」的照妖镜——翻译只在 open 时刻发生，
+     * 已经打开的 fd 会直接暴露物理路径。
+     */
+    private void probeFd() {
+        put("P20", "fd", "fd count", () -> {
+            String[] list = new File("/proc/self/fd").list();
+            return "count=" + (list == null ? -1 : list.length);
+        });
+        put("P21", "fd", "fd targets sample", () -> {
+            File dir = new File("/proc/self/fd");
+            String[] list = dir.list();
+            if (list == null) {
+                return "cannot list";
+            }
+            StringBuilder sb = new StringBuilder();
+            int shown = 0;
+            for (String name : list) {
+                try {
+                    String target = new File(dir, name).getCanonicalPath();
+                    if (sb.length() > 0) {
+                        sb.append(" ;; ");
+                    }
+                    sb.append(name).append("->").append(target);
+                    if (++shown >= 5) {
+                        break;
+                    }
+                } catch (Throwable ignore) {
+                    // fd 可能在遍历时被关闭
+                }
+            }
+            return sb.toString();
+        });
+    }
+
+    // ---------------------------------------- 挂载表（新大类）
+
+    /**
+     * 新大类 #7：/proc/self/mountinfo。容器若用 mount namespace 伪装路径，
+     * 这里会留下痕迹；反之如果有不该出现在沙箱里的挂载点，也在这里暴露。
+     */
+    private void probeMount() {
+        put("P22", "mount", "mountinfo readable", () -> {
+            File f = new File("/proc/self/mountinfo");
+            boolean canRead = f.canRead();
+            int lines = 0;
+            if (canRead) {
+                String s = readText(f, 1 << 20);
+                for (String l : s.split("\n")) {
+                    if (!l.isEmpty()) {
+                        lines++;
+                    }
+                }
+            }
+            return "canRead=" + canRead + " lines=" + lines;
+        });
+        put("P23", "mount", "sandbox mount points", () -> {
+            File f = new File("/proc/self/mountinfo");
+            if (!f.canRead()) {
+                return "unreadable";
+            }
+            String s = readText(f, 1 << 20);
+            int sandbox = 0;
+            StringBuilder sb = new StringBuilder();
+            for (String l : s.split("\n")) {
+                if (l.contains("com.nextvm.app") || l.contains("/virtual/")) {
+                    sandbox++;
+                    if (sb.length() < 200) {
+                        int idx = l.indexOf(" - ");
+                        sb.append(idx > 0 ? l.substring(idx) : l).append(" ;; ");
+                    }
+                }
+            }
+            return "sandboxMounts=" + sandbox + " " + sb;
+        });
     }
 
     // ------------------------------------------------------------------ native
