@@ -1,0 +1,132 @@
+// GitHub API 客户端（token 从 token.txt 读取，绝不打印）
+// 用法:
+//   node tools/gh-api.mjs <api-path>            # 输出 JSON（大字段截断）
+//   node tools/gh-api.mjs --logs <run-id> <out> # 下载 run 日志 zip
+import fs from 'node:fs';
+import http from 'node:http';
+import tls from 'node:tls';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const TOKEN_FILE = path.join(ROOT, 'token.txt');
+const OUT_FILE = path.join(ROOT, 'probe-reports', 'gh-out.json');
+const PROXY = { host: '127.0.0.1', port: 12450 };
+
+function token() {
+  const t = fs.readFileSync(TOKEN_FILE, 'utf8').trim();
+  if (!t) throw new Error('token.txt is empty');
+  return t;
+}
+
+function decodeChunked(buf) {
+  const parts = [];
+  let pos = 0;
+  while (pos < buf.length) {
+    const lineEnd = buf.indexOf('\r\n', pos);
+    if (lineEnd < 0) break;
+    const size = parseInt(buf.slice(pos, lineEnd).toString('ascii').trim(), 16);
+    if (!size || Number.isNaN(size)) break;
+    const start = lineEnd + 2;
+    parts.push(buf.slice(start, start + size));
+    pos = start + size + 2;
+  }
+  return Buffer.concat(parts);
+}
+
+function request(host, pathname, extraHeaders = {}) {
+  return new Promise((resolve, reject) => {
+    const headers = {
+      'User-Agent': 'sandboxsensor-ci-probe',
+      Accept: 'application/vnd.github+json',
+      'X-GitHub-Api-Version': '2022-11-28',
+      ...extraHeaders,
+    };
+    const connectReq = http.request({
+      host: PROXY.host,
+      port: PROXY.port,
+      method: 'CONNECT',
+      path: `${host}:443`,
+      timeout: 20000,
+    });
+    connectReq.on('connect', (res, socket) => {
+      if (res.statusCode !== 200) {
+        socket.destroy();
+        return reject(new Error(`CONNECT ${res.statusCode}`));
+      }
+      const s = tls.connect({ socket, servername: host }, () => {
+        const head = Object.entries(headers).map(([k, v]) => `${k}: ${v}`).join('\r\n');
+        s.write(`GET ${pathname} HTTP/1.1\r\nHost: ${host}\r\n${head}\r\nConnection: close\r\n\r\n`);
+      });
+      const chunks = [];
+      s.on('data', (c) => chunks.push(c));
+      s.on('end', () => {
+        const buf = Buffer.concat(chunks);
+        const idx = buf.indexOf('\r\n\r\n');
+        const head = buf.slice(0, idx).toString('utf8');
+        let body = buf.slice(idx + 4);
+        if (/transfer-encoding:\s*chunked/i.test(head)) {
+          body = decodeChunked(body);
+        }
+        const status = Number((head.match(/HTTP\/1\.\d (\d+)/) || [, '0'])[1]);
+        const loc = (head.match(/^location:\s*(.+)$/im) || [, ''])[1].trim();
+        resolve({ status, location: loc, body });
+      });
+      s.on('error', reject);
+      s.setTimeout(30000, () => { s.destroy(); reject(new Error('tls timeout')); });
+    });
+    connectReq.on('error', reject);
+    connectReq.on('timeout', () => { connectReq.destroy(); reject(new Error('proxy timeout')); });
+    connectReq.end();
+  });
+}
+
+async function apiGet(pathname) {
+  const host = 'api.github.com';
+  let p = pathname;
+  for (let hop = 0; hop < 4; hop++) {
+    const r = await request(host, p, { Authorization: `Bearer ${token()}` });
+    if (r.status >= 300 && r.status < 400 && r.location) {
+      // 日志下载会跳到 S3 预签名 URL：此时不能再带 Authorization
+      if (r.location.startsWith('https://')) {
+        const u = new URL(r.location);
+        const r2 = await request(u.hostname, u.pathname + u.search, {});
+        return { status: r2.status, body: r2.body };
+      }
+      p = r.location;
+      continue;
+    }
+    return { status: r.status, body: r.body };
+  }
+  throw new Error('too many redirects');
+}
+
+const args = process.argv.slice(2);
+
+if (args[0] === '--logs') {
+  const runId = args[1];
+  const out = args[2] || `probe-reports/run-${runId}-logs.zip`;
+  const r = await apiGet(`/repos/wentureing/sandboxsensor/actions/runs/${runId}/logs`);
+  if (r.status !== 200) {
+    console.error(`logs download failed: HTTP ${r.status}`);
+    process.exit(1);
+  }
+  fs.mkdirSync(path.dirname(out), { recursive: true });
+  fs.writeFileSync(out, r.body);
+  console.log(`saved ${out} (${r.body.length} bytes)`);
+} else {
+  const p = args[0];
+  if (!p) {
+    console.error('usage: gh-api.mjs <api-path> | --logs <run-id> [out]');
+    process.exit(2);
+  }
+  const r = await apiGet(p);
+  if (r.status !== 200) {
+    console.error(`HTTP ${r.status}`);
+    console.error(r.body.toString('utf8').slice(0, 500));
+    process.exit(1);
+  }
+  fs.mkdirSync(path.dirname(OUT_FILE), { recursive: true });
+  fs.writeFileSync(OUT_FILE, r.body);
+  console.log(`HTTP 200, ${r.body.length} bytes -> ${OUT_FILE}`);
+}
