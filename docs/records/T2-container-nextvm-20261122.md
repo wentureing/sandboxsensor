@@ -4,7 +4,7 @@
 - 设备：vivo V2463A / Android 15 / API 35 / arm64-v8a
 - 容器：`com.nextvm.app`（含补丁 p1：`ActivityInfo` 资源字段归零 + `CmdReceiver`）
 - 探针：`com.sandbox.probe` v1.1（Provider 入口）
-- 原始数据：`probe-reports/t2-163831.txt`、`report-t2-163831-1/2.json`、`early-t2-163831-1.json`
+- 原始数据：`../probe-reports/t2-163831.txt`、`report-t2-163831-1/2.json`、`early-t2-163831-1.json`
 
 ---
 

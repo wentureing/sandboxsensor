@@ -4,7 +4,7 @@
 - 设备：vivo V2463A / Android 15 / API 35 / arm64-v8a / PAGESIZE 4096
 - 容器：`com.nextvm.app` v1.0.0-alpha01（`wentureing/ShitJumpingVM` fork，原版未改）
 - 探针：`com.sandbox.probe` v1.0（51 项 + 6 provider）
-- 数据源：`probe-reports/logcat-dump-20261122-151219.txt`（`adb logcat -d -b all`）
+- 数据源：`../probe-reports/logcat-dump-20261122-151219.txt`（`adb logcat -d -b all`）
 
 ---
 

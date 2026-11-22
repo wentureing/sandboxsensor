@@ -1,7 +1,7 @@
 # 项目状态（STATUS）
 
 > 最后更新：2026-11-22
-> 本文件是唯一"当前状态"入口，历史细节见 `records/` 与 `01`–`07` 调研文档。
+> 本文件是唯一"当前状态"入口，历史细节见 `docs/records/` 与 `docs/01`–`docs/07` 调研文档。
 
 ---
 
@@ -52,7 +52,7 @@ gradle-home-8.9-v1
 | 输出通道 | ① `files/probe-report.json`（`run-as` 可拉）② logcat 分块 base64（`REPORT v1 part n/m`）③ `flushEarly` 的 `EARLY v1` 分块 |
 | 版本 | `versionCode 2` / `versionName 1.1` |
 
-T1 golden 基线（Android 15 / vivo V2463A）：`records/installed-V2463A-150347.md`（57 项全 ok）。
+T1 golden 基线（Android 15 / vivo V2463A）：`docs/records/installed-V2463A-150347.md`（57 项全 ok）。
 
 ---
 

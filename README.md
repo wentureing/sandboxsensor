@@ -12,7 +12,7 @@
 
 ```
 .
-├── 01..07-*.md              调研与设计文档（决策依据）
+├── docs/                    调研文档 01–07 + records/ 测试记录
 ├── probe/                   探针 APK（com.sandbox.probe）
 │   ├── build.gradle.kts
 │   └── src/main/{AndroidManifest.xml, java/, cpp/}

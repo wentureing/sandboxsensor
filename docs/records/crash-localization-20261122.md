@@ -3,7 +3,7 @@
 - 日期：2026-11-22 16:47–16:52
 - 设备：vivo V2463A / Android 15 / Adreno（`ro.hardware.vulkan=adreno`）
 - 容器：ShitJumpingVM + p1 补丁
-- 原始日志：`probe-reports/launch-164933.txt`（496 KB）
+- 原始日志：`../probe-reports/launch-164933.txt`（496 KB）
 
 ---
 
