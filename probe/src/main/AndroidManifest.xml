@@ -19,10 +19,19 @@
             android:exported="false"
             android:initOrder="1000" />
 
+        <!--
+          探针主入口是 ProbeProvider（见 ProbeProvider.onCreate）。
+          Activity 仅保留为手动/调试入口，并刻意使用 NoActionBar 主题：
+          容器里 PhoneWindow.setDefaultIcon() 会拿宿主的 ActivityInfo.icon
+          （0x7f0a0000）去 guest Resources 查 drawable，导致 NotFoundException。
+          去掉 ActionBar 可绕过该调用，便于在容器内手动启动排查。
+          同时声明 icon 指向系统资源，避免 0x7f 前缀。
+        -->
         <activity
             android:name=".ProbeActivity"
             android:exported="true"
-            android:theme="@android:style/Theme.Material.Light">
+            android:icon="@android:drawable/sym_def_app_icon"
+            android:theme="@android:style/Theme.Material.NoActionBar">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />

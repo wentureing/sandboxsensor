@@ -6,28 +6,51 @@ import android.content.Context;
 import android.database.Cursor;
 import android.net.Uri;
 import android.os.Bundle;
+import android.util.Log;
+
+import org.json.JSONObject;
 
 /**
- * 最早能拿到 Context 的位置（早于 Application.onCreate）。
+ * 探针主入口（v1.1 起）。
  *
- * 这里打两个点：
- *   1) 时序标记 → 用于验证容器是否在 Provider 之前完成 Context 替换；
- *   2) 路径快照 → 若容器接管太晚，这里读到的就是宿主真实路径，会被记录下来。
+ * 为什么改用 ContentProvider 触发：
+ *   在应用级虚拟化容器里，guest 的 Resources 往往未正确绑定
+ *   （ShitJumpingVM breadcrumb: getResources()=THREW），而 Activity 启动时
+ *   框架会在 super.onCreate() 内调用 PhoneWindow.setDefaultIcon() →
+ *   Context.getDrawable(activityInfo.icon)，其中 icon 仍是宿主 stub 的资源 ID
+ *   → Resources$NotFoundException，任何 Activity 都无法启动。
+ *
+ *   而 Provider 阶段容器已实测可用（provider ok → Application.onCreate），
+ *   因此把探针触发放在这里：导入 APK 后只要容器启动 guest，探针就会自动跑完，
+ *   完全不需要点开任何界面、不触碰 Window / Resources。
  */
 public class ProbeProvider extends ContentProvider {
+
+    private static final String TAG = "PROBE";
 
     @Override
     public boolean onCreate() {
         Report.mark("ContentProvider.onCreate");
-        Context ctx = getContext();
-        if (ctx != null) {
-            Report.providerSnapshot(ctx);
-            // 容器里 Activity 可能在资源绑定时崩溃（见 T2-pre 记录），
-            // 这里先把 Provider 阶段的证据落盘，保证即使后续崩溃也有数据可查。
-            Report.flushEarly(ctx, "ContentProvider.onCreate");
-        } else {
+        final Context ctx = getContext();
+        if (ctx == null) {
             Report.mark("ContentProvider.onCreate:nullContext");
+            return true;
         }
+
+        // 1) 同步快照 + 立即落盘：即使随后任何阶段崩溃，也有 Provider 阶段证据
+        Report.providerSnapshot(ctx);
+        Report.flushEarly(ctx, "ContentProvider.onCreate");
+
+        // 2) 后台线程跑全量探针：不依赖 Activity
+        new Thread(() -> {
+            try {
+                JSONObject payload = new ProbeRunner(ctx).run();
+                Report.flush(ctx, payload);
+            } catch (Throwable t) {
+                Log.e(TAG, "fatal in ProbeRunner(provider entry)", t);
+            }
+        }, "probe-runner-provider").start();
+
         return true;
     }
 
