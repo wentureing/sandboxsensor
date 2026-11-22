@@ -31,24 +31,29 @@
             android:name=".ProbeActivity"
             android:exported="true"
             android:icon="@android:drawable/sym_def_app_icon"
-            android:theme="@android:style/Theme.Material.NoActionBar">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-        </activity>
+            android:theme="@android:style/Theme.Material.NoActionBar" />
 
         <!--
-          UiTestActivity（v1.5）：纯 UI 排查页。
+          UiTestActivity（v1.5+）：纯 UI 排查页。
           只显示可长按选中的文本，不跑任何虚拟环境检查，也不自动 finish。
-          用法：
-            adb shell am start -n com.sandbox.probe/.UiTestActivity
+
+          重要：它承担 **LAUNCHER 入口**。
+          原因：容器（NEXTVM）在启动 guest 时只解析 LAUNCHER 组件，
+          `am start -n <pkg>/.SomeActivity` 会被劫持成 LAUNCHER 那个 Activity
+          （实测：指定 UiTestActivity，实际 Displayed 的是 ProbeActivity）。
+          所以把 LAUNCHER 放在这里，才能从容器卡片/am start 直达本页。
+          探针本体仍由 ProbeProvider 自动触发，不依赖 Activity 入口。
         -->
         <activity
             android:name=".UiTestActivity"
             android:exported="true"
             android:icon="@android:drawable/sym_def_app_icon"
-            android:theme="@android:style/Theme.Material.Light.NoActionBar" />
+            android:theme="@android:style/Theme.Material.Light.NoActionBar">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
     </application>
 
 </manifest>
