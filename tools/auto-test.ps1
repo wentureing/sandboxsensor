@@ -20,10 +20,22 @@ param(
     [string]$Out = "probe-reports",
     [int]$WaitSec = 30,
     [int]$HumanWaitSec = 0,
-    [switch]$SkipT1
+    [switch]$SkipT1,
+    [switch]$Reset
 )
 
 $ErrorActionPreference = 'Stop'
+
+# ==================== 复位守卫 ====================
+# 本脚本含清 logcat / force-stop / uninstall 等复位动作，会破坏正在进行的现场定位。
+# 默认不执行；需要时显式加 -Reset。
+if (-not $Reset) {
+    Write-Host "[复位守卫] 将执行：清 logcat / force-stop / uninstall，可能破坏现场。" -ForegroundColor Yellow
+    Write-Host "[复位守卫] 已停止。确认要复位请加 -Reset 重新执行。" -ForegroundColor Yellow
+    Write-Host "[复位守卫] 只读采集请用：adb logcat -d -b all > file（不要加 -c）" -ForegroundColor Gray
+    return
+}
+# ==================================================
 $Pkg = 'com.sandbox.probe'; $Act = "$Pkg/.ProbeActivity"
 $HostPkg = 'com.nextvm.app'; $Cmd = "$HostPkg/.CmdReceiver"
 $script:adbArgs = @('-s', $Serial)

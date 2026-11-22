@@ -27,10 +27,20 @@ param(
     [string]$Out = 'probe-reports',
     [int]$TimeoutSec = 90,
     [switch]$Install,
-    [string]$Serial
+    [string]$Serial,
+    [switch]$Reset
 )
 
 $ErrorActionPreference = 'Stop'
+
+# ==================== 复位守卫 ====================
+# 本脚本会清 logcat 并 force-stop 探针进程，可能破坏现场。
+if (-not $Reset) {
+    Write-Host "[复位守卫] 将执行：清 logcat + force-stop 探针。" -ForegroundColor Yellow
+    Write-Host "[复位守卫] 已停止。确认要复位请加 -Reset 重新执行。" -ForegroundColor Yellow
+    return
+}
+# ==================================================
 $Pkg = 'com.sandbox.probe'
 $Activity = "$Pkg/.ProbeActivity"
 
