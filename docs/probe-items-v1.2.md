@@ -133,3 +133,31 @@
 | **P09/P11** | 虚路径方案落地后，这两个值应变成 `/data/user/0/<guest_pkg>/lib/arm64` 且 `exists=true` |
 | **P05/P06** | 虚路径 + maps 伪造落地后，`hostHits` 应降到 0 |
 | **P21** | 路径翻译是否覆盖到"已打开 fd"（当前只在 open 时刻翻译，这里会暴露差距） |
+
+---
+
+## v1.4 新增：第 8 个大类 `uiprobe`（P24–P27）
+
+> 来源：`records/nextvm-defects-textselection-and-via-20261122.md` §9
+> 目的：不用 UI 自动化，直接在容器内验证「长按触发文字选择」所依赖的窗口链路。
+
+| ID | 检测 | 为什么重要 |
+| --- | --- | --- |
+| `P24` | `new View(activity)` 能否创建 | 容器内 Resources 是否绑定成功（失败会导致所有 UI 类探针不可用） |
+| `P25` | `PopupWindow.showAtLocation` 是否成功 | **`FloatingToolbar`（文字选择菜单）就是 PopupWindow** |
+| `P26` | `addView(TYPE_APPLICATION_ATTACHED_DIALOG)` | `FloatingActionMode` 用的正是这个窗口类型 |
+| `P27` | `window/decorView` 的 token / attached | PopupWindow 的 anchor 是否可用 |
+
+**实现要点**：
+- 这些 API 必须在 **UI 线程 + Activity 存活**时调用 → 由 `UiProbe.run(activity)` 在
+  `ProbeActivity.onCreate` 同步执行，结果暂存，再由 `ProbeRunner.probeUiEntries()` 合并。
+- 每步独立 `try/catch`，失败记录异常类型（不会拖死整个探针）。
+- 只用最裸的 `View(Context)`，避免 `Resources$NotFoundException`。
+
+**判读**：
+
+| 结果 | 含义 |
+| --- | --- |
+| `P25 showing=true` + `P26 added+removed ok` | 窗口链路正常 → 长按卡死的原因不在 popup |
+| `P25 THREW ...` / `P26 THREW ...` | **确认断点在子窗口** → 容器的 WindowManager 代理不完整 |
+| `P24 THREW Resources$NotFoundException` | 容器 Resources 未绑定，需要先修这个 |
