@@ -37,6 +37,18 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!--
+          UiTestActivity（v1.5）：纯 UI 排查页。
+          只显示可长按选中的文本，不跑任何虚拟环境检查，也不自动 finish。
+          用法：
+            adb shell am start -n com.sandbox.probe/.UiTestActivity
+        -->
+        <activity
+            android:name=".UiTestActivity"
+            android:exported="true"
+            android:icon="@android:drawable/sym_def_app_icon"
+            android:theme="@android:style/Theme.Material.Light.NoActionBar" />
     </application>
 
 </manifest>
