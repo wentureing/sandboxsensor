@@ -21,7 +21,7 @@ on:
       - '.github/workflows/container-build.yml'
 
 permissions:
-  contents: read
+  contents: write
 
 # 触发说明：本 workflow 只在自身文件变化或手动 dispatch 时运行。
 # 改完 ShitJumpingVM 后，在此做一个无副作用改动即可触发重建。
@@ -147,13 +147,16 @@ jobs:
             echo "::warning::no apk produced"
           fi
 
-      - name: Upload container APK
-        uses: actions/upload-artifact@v4
+      # 不使用 upload-artifact（强制 zip）；直接挂 Release asset。
+      - name: Publish APK to Release
+        uses: softprops/action-gh-release@v2
         with:
-          name: container-apk
-          path: out/*.apk
-          if-no-files-found: warn
-          retention-days: 30
+          tag_name: apk-latest
+          name: APK (latest)
+          body: "container APK built from ${{ github.sha }}"
+          prerelease: true
+          overwrite_files: true
+          files: out/*.apk
 
       - name: Upload build reports
         if: failure()

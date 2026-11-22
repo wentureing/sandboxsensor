@@ -21,7 +21,7 @@ on:
       - '.github/workflows/probe-build.yml'
 
 permissions:
-  contents: read
+  contents: write
 
 # 同一分支重复触发时取消旧任务，避免浪费私有仓库 Actions 额度
 concurrency:
@@ -129,13 +129,17 @@ jobs:
           echo "=== native libs (16KB 对齐检查) ==="
           find probe/build -name 'libprobe.so' -exec ls -lh {} \; || true
 
-      - name: Upload probe APK
-        uses: actions/upload-artifact@v4
+      # 不使用 upload-artifact：GitHub 会把产物强制打成 zip。
+      # 挂到 Release 后，下载链接就是 .apk 文件本身（无 zip、无目录层级）。
+      - name: Publish APK to Release
+        uses: softprops/action-gh-release@v2
         with:
-          name: probe-apk
-          path: out/*.apk
-          if-no-files-found: error
-          retention-days: 30
+          tag_name: apk-latest
+          name: APK (latest)
+          body: "probe APK built from ${{ github.sha }}"
+          prerelease: true
+          overwrite_files: true
+          files: out/*.apk
 
       - name: Upload build reports
         if: failure()
