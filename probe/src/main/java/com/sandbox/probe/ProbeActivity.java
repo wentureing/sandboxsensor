@@ -3,17 +3,19 @@ package com.sandbox.probe;
 import android.app.Activity;
 import android.os.Bundle;
 import android.util.Log;
-import android.widget.TextView;
 
 import org.json.JSONObject;
 
 /**
  * 触发全量探针。
  *
- * 设计要点：
- *   * 探针在后台线程执行，避免 ANR；
- *   * 结果同时输出到 logcat（分块 base64，主通道）与 files/probe-report.json（备份）；
- *   * 跑完自己 finish()，便于 adb 自动化；容器内 finish 行为异常也不影响已输出的报告。
+ * 重要设计（T2-pre 之后修正）：
+ *   **不创建任何 View、不调用 setContentView。**
+ *   在应用级虚拟化容器里，guest 的 Resources 往往没有正确绑定
+ *   （ShitJumpingVM 上表现为 breadcrumb "getResources()=THREW"），
+ *   一旦 new TextView(this) 就会抛 Resources$NotFoundException，
+ *   整个探针在进入 ProbeRunner 之前就死了。
+ *   探针的目的是测平台 API，不需要 UI，因此彻底去掉渲染依赖。
  */
 public class ProbeActivity extends Activity {
 
@@ -21,11 +23,6 @@ public class ProbeActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         Report.mark("Activity.onCreate");
-
-        TextView tv = new TextView(this);
-        tv.setText("Sandbox Probe\nrunning…");
-        tv.setPadding(48, 96, 48, 48);
-        setContentView(tv);
 
         new Thread(() -> {
             JSONObject payload;

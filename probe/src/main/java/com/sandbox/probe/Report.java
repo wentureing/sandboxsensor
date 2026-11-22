@@ -142,4 +142,37 @@ public final class Report {
         } catch (Throwable ignored) {
         }
     }
+
+    /**
+     * 早期落盘：把当前 timeline + provider 快照写到 files/probe-early.json。
+     * 用于「Activity 阶段崩溃、但 Provider 已跑完」的场景（见 records/T2-pre-*.md）。
+     */
+    public static void flushEarly(Context ctx, String stage) {
+        try {
+            JSONObject o = new JSONObject();
+            o.put("schema", 1);
+            o.put("stage", stage);
+            o.put("packageName", ctx.getPackageName());
+            o.put("timeline", TIMELINE);
+            o.put("provider", PROVIDER);
+            String json = o.toString();
+
+            File f = new File(ctx.getFilesDir(), "probe-early.json");
+            try (FileOutputStream fos = new FileOutputStream(f)) {
+                fos.write(json.getBytes(StandardCharsets.UTF_8));
+            }
+            // 同时走 logcat：容器内 files 目录在宿主机不易定位，logcat 更容易捞
+            String b64 = Base64.encodeToString(json.getBytes(StandardCharsets.UTF_8), Base64.NO_WRAP);
+            final int chunk = 1800;
+            int total = (b64.length() + chunk - 1) / chunk;
+            for (int i = 0; i < total; i++) {
+                int s = i * chunk;
+                int e = Math.min(b64.length(), s + chunk);
+                Log.i(TAG, "EARLY v1 part " + (i + 1) + "/" + total + " " + b64.substring(s, e));
+            }
+            Log.i(TAG, "EARLY v1 end stage=" + stage + " parts=" + total);
+        } catch (Throwable t) {
+            Log.w(TAG, "flushEarly failed: " + t);
+        }
+    }
 }

@@ -22,6 +22,9 @@ public class ProbeProvider extends ContentProvider {
         Context ctx = getContext();
         if (ctx != null) {
             Report.providerSnapshot(ctx);
+            // 容器里 Activity 可能在资源绑定时崩溃（见 T2-pre 记录），
+            // 这里先把 Provider 阶段的证据落盘，保证即使后续崩溃也有数据可查。
+            Report.flushEarly(ctx, "ContentProvider.onCreate");
         } else {
             Report.mark("ContentProvider.onCreate:nullContext");
         }
