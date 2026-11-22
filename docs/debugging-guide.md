@@ -1,0 +1,118 @@
+# 调试指南：先看 GuestBreadcrumb，再看 native/crash
+
+- 制定：2026-11-22
+- 起因：排查 NEXTVM 的「长按卡死 / Via 主页源码」绕了大量弯路，最后发现上游早就埋好了全链路 breadcrumb（**199 处**），我们没用
+
+---
+
+## 一、为什么把 GuestBreadcrumb 放在第一位
+
+上游 `NEXTVM` 在 `core/virtualization/lifecycle/GuestBreadcrumb.kt` 里实现了一套**有序、带时间戳、文件持久化**的 guest 生命周期事件日志。它的注释直接说明了设计动机：
+
+> Rationale: every prior experiment says the splash stall completes silently —
+> no crash, no second activity, no IPC. Two silent-failure shapes remain untested:
+> (2) an exception thrown inside a lifecycle step and swallowed by one of the engine's
+> catch sites (each of which historically logged a one-line message with NO stack),
+> aborting the step mid-flight while the framework believes it completed;
+> (3) an init step that is simply never called...
+>
+> Every swallowed exception on a lifecycle path is recorded here **WITH its full stack trace**.
+
+**换句话说：它专门解决"静默失败"——正是我们这几天反复踩的坑。**
+
+| 我们遇到的症状 | 传统排查路径 | Breadcrumb 能直接给出 |
+| --- | --- | --- |
+| 长按卡死 → ANR（拿不到 Java 栈） | 抓 tombstone / bugreport / 猜 | 卡住前最后执行到哪一步、哪一步抛了异常 |
+| Via 主页显示源码 | 猜 MIME / 猜 WebView 进程 | guest 的 `Application`/`Activity` 生命周期到哪一步、有没有异常被吞 |
+| guest 起不来（无崩溃日志） | 看 native 栈（我们就这样误判到 GPU 驱动） | 哪一步 `never called` |
+
+---
+
+## 二、怎么取
+
+### 2.1 logcat（最快）
+
+```powershell
+adb logcat -d -b all -v threadtime | Select-String "BootCrumb"
+```
+
+**tag = `BootCrumb`**。
+
+### 2.2 文件（最全，含被吞异常的完整栈）
+
+路径：
+
+```
+/data/user/0/com.nextvm.app/files/virtual/data/<instance>/files/breadcrumb-<pid>.log
+```
+
+取法（容器可 run-as）：
+
+```powershell
+# 1) 找 instance 目录
+adb shell "run-as com.nextvm.app ls files/virtual/data/"
+
+# 2) 列出 breadcrumb 文件（按 pid 命名）
+adb shell "run-as com.nextvm.app ls -l files/virtual/data/<instance>/files/ | grep breadcrumb"
+
+# 3) 导出（中文路径下 adb pull 会失败，先用 TEMP 中转）
+adb shell "run-as com.nextvm.app cat files/virtual/data/<instance>/files/breadcrumb-<pid>.log" > $env:TEMP\crumb.log
+Move-Item $env:TEMP\crumb.log .\probe-reports\crumb.log
+```
+
+### 2.3 关键特性（决定怎么读）
+
+| 特性 | 说明 |
+| --- | --- |
+| **有序** | 事件按发生顺序记录，能看出"卡在哪一步" |
+| **时间锚点** | v76 起 `begin()` 记录 `wall=System.currentTimeMillis()`，相对 `[+ms]` 可与 logcat 对齐 |
+| **覆盖所有 guest** | v52 起不再只对单个包生效 |
+| **缓冲 4000 行** | 早期事件在 `attachFile` 之前先缓存在内存 |
+| **不干扰 guest** | 所有入口自己吞异常（诊断不改变被测行为） |
+
+---
+
+## 三、推荐排查顺序（新）
+
+```
+1. adb logcat -d -b all | Select-String "BootCrumb"        ← 先看这个
+2. 看 breadcrumb-<pid>.log 的末尾                            ← 找"最后一步"和"被吞的异常+栈"
+3. 如果 breadcrumb 正常但行为仍异常 → 再按症状分层：
+     - UI/绘制问题  → dumpsys window / screencap / FrameMetrics
+     - 输入/ANR     → dumpsys activity lastanr / events buffer 的 am_anr
+     - 路径/IO      → 探针 N01-N15（native libc 探针）
+     - 检测面       → 探针 P01-P27
+4. 最后才看 native 栈（tombstone / bugreport）
+```
+
+**原顺序的问题**：我们之前一上来就看 `Fatal signal` 的栈顶（`libllvm-glnext`），把它当成根因，结果是容器的 hook 污染了 GPU 驱动——**栈顶在驱动里，病因在容器里**。
+
+---
+
+## 四、这次绕弯路的完整教训
+
+| 问题 | 我们走的弯路 | Breadcrumb 能省掉的步骤 |
+| --- | --- | --- |
+| RenderThread SIGABRT | 先归因"Adreno 驱动缺陷"（查了 Flutter/Chromium workaround），后来才发现是 hook 污染 GPU 驱动 | 如果在崩溃前看 breadcrumb，能看到 guest 启动到哪一步、有没有 IO 异常 |
+| 长按 ANR | 猜 `WindowManager` / `PopupWindow` / `Window.Callback`，查了一圈 | breadcrumb 能显示长按后 guest 走进哪个生命周期回调、有没有异常 |
+| Via 主页源码 | 猜 MIME / 猜 WebView patch，最后才发现是 WebView 渲染在 isolated 进程 | 至少能先排除"guest 启动链路"本身的问题 |
+
+**共同点**：我们反复在"从结果倒推原因"，而 breadcrumb 是"正向记录过程"。
+
+---
+
+## 五、其他可用的调试资产（同为上游遗留）
+
+| 资产 | 位置 | 用途 |
+| --- | --- | --- |
+| `StateProbe` / `DiagSuspendGate` | `lifecycle/StateProbe.kt` | 状态快照与挂起诊断 |
+| `DexMemDump` | `lifecycle/DexMemDump.kt` | dex 内存 dump |
+| `ProcessKillGuard` | `engine/ActivityThreadHook.kt:2071` | 进程被杀保护 |
+| `NextVmInstrumentation` | `engine/ActivityThreadHook.kt:1820` | 替换的 Instrumentation（生命周期观察点） |
+
+---
+
+## 六、一句话
+
+> **遇到"guest 行为异常但没崩溃/没栈"时，先 `Select-String "BootCrumb"`，再决定往哪查。**
+> 上游已经为这类问题埋了 199 个点，我们不该从零猜起。

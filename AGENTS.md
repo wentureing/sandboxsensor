@@ -71,11 +71,46 @@ git remote set-url origin https://github.com/wentureing/sandboxsensor.git
 
 采集一律用：`adb logcat -d -b all -v threadtime > file`（不带 `-c`）。
 
+## 排查问题的第一站：GuestBreadcrumb（不要跳过）
+
+> **遇到「guest 行为异常但没崩溃 / 没栈 / 没日志」时，先看 breadcrumb，再决定往哪查。**
+
+上游 NEXTVM 已在全链路埋了 **199 处** `GuestBreadcrumb`，它记录**有序、带时间戳、含被吞异常完整栈**的 guest 生命周期事件。专为"静默失败"设计。
+
+| 取法 | 命令 / 路径 |
+| --- | --- |
+| logcat（最快） | `adb logcat -d -b all -v threadtime \| Select-String "BootCrumb"` |
+| 文件（含完整栈） | `/data/user/0/com.nextvm.app/files/virtual/data/<instance>/files/breadcrumb-<pid>.log` |
+
+**推荐排查顺序**：
+
+```
+1. BootCrumb 日志                              ← 先看这个
+2. breadcrumb-<pid>.log 末尾                    ← 找"最后一步"+"被吞的异常"
+3. 按症状分层：窗口/输入/路径/检测面（对应探针 P/N 系列）
+4. 最后才看 native 栈（tombstone / bugreport）
+```
+
+**为什么会绕弯路**（本项目已发生的教训）：
+
+| 症状 | 我们的错误路径 | breadcrumb 能省的 |
+| --- | --- | --- |
+| RenderThread SIGABRT | 一上来归因"Adreno 驱动缺陷"（查 Flutter/Chromium workaround），实际是容器 hook 污染 GPU 驱动 | 直接看到 guest 启动到哪一步 |
+| 长按 ANR | 猜 `WindowManager`/`PopupWindow`/`Window.Callback` | 显示长按后走进哪个生命周期回调 |
+| Via 主页源码 | 猜 MIME / 猜 WebView patch，实际是渲染在 isolated 进程 | 至少先排除 guest 启动链路问题 |
+
+**一句话**：栈顶在驱动里，不代表病因在驱动里；breadcrumb 是正向记录过程，比从结果倒推可靠。
+
+详细用法见 `docs/debugging-guide.md`。
+
 ## 其他约定
 
 - **凭据**：`token.txt` 不入库、不读取内容到对话中；脚本内读取后立即用于请求
 - **产物命名**：`<类型>-<7位sha>[-<abi>].apk`
-- **容器 command 通道**：`adb shell am broadcast -n com.nextvm.app/.CmdReceiver -a com.nextvm.cmd.{INSTALL|LAUNCH|UNINSTALL}`
-  - 装 APK 必须放 app 私有目录：容器自身把 `/sdcard` 重定向到沙箱，读不到外部路径
+- **容器 command 通道**：`adb shell am broadcast -n com.nextvm.app/.CmdReceiver -a com.nextvm.cmd.{INSTALL|LAUNCH|LAUNCH_ACTIVITY|UNINSTALL|LIST}`
+  - `LAUNCH_ACTIVITY --es pkg <pkg> --es activity <完整类名>`：容器启动 guest 时**只解析 LAUNCHER**，要起非 LAUNCHER 页面必须用这条
+  - 结果统一打到 `logcat -d -s CmdReceiver`
+  - **导入豁免**（p18）：`/sdcard/Download/`、`/storage/emulated/0/Download/`、`/data/local/tmp/` 可直接 `INSTALL --es path`，不必再 push + run-as 复制
+  - 其他路径仍需放到 app 私有目录（容器自身把 `/sdcard` 重定向到沙箱）
 - **测试设备**：`10AFA8169Z0039G`（vivo V2463A / Android 15 / arm64-v8a / PAGESIZE=4096）
 - **设备时钟**比电脑快约 2 分钟，日志按设备时间切片

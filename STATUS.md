@@ -5,6 +5,44 @@
 
 ---
 
+## 0. 当前结论与开工前必读
+
+### 0.1 排查顺序（本项目已绕弯路的教训）
+
+> **guest 行为异常但没崩溃/没栈时，先看 GuestBreadcrumb**（logcat tag = BootCrumb），
+> 再看探针 P/N 系列，**最后**才看 native 栈。详见 AGENTS.md 与 docs/debugging-guide.md。
+
+上游 NEXTVM 已埋 **199 处** breadcrumb，记录有序、带时间戳、含被吞异常的完整栈。
+本项目两次重大弯路（把 SigAbrt 归因为 Adreno 驱动缺陷、把长按 ANR 归因为 PopupWindow）
+都是因为跳过了它以「从栈顶倒推」。
+
+### 0.2 已确认的边界（不要再重复调查）
+
+| 结论 | 依据 |
+| --- | --- |
+| **RenderThread SIGABRT 的根因是容器 native hook 污染 GPU 驱动**，不是 Adreno 缺陷 | 
+ecords/root-cause-native-hook-pollution-20261122.md |
+| hook 作用域原则：**容器自身 + 图形栈永不 patch**；系统库默认不 patch | 
+ecords/root-cause-native-hook-pollution-20261122.md |
+| **WebView 渲染在 webview_zygote 派生的 isolated 进程**，容器 hook 覆盖不到；因此「Via 主页显示源码」无法靠 patch native 库解决 | 
+ecords/two-investigations-20261122.md |
+| 文字选择（FloatingActionMode）**在容器内完全正常**（复制/全选/搜索/分享 都显示） | 
+ecords/webview-rootcause-20261122.md |
+| 容器**不属于 VirtualApp 家族**（VA 标识 0 命中），Apache-2.0；上游 = TanvirHossain2/NEXTVM | 
+ecords/upstream-provenance-20261122.md |
+
+### 0.3 待办的确定方向
+
+| 方向 | 状态 |
+| --- | --- |
+| WebResourceResponse 代理（宿主代读 ile://，绕 isolated uid） | 建议优先验证 Gaia 是否用此机制 |
+| 修 P13/P16（宿主包可见、宿主 data 可 stat） | 未做 |
+| 补 READ_MEDIA_* 权限（Android 13+） | 未做（见 
+ecords/project-health-20261122.md） |
+| 导出通道写豁免（须过 caller_is_guest） | 待办，见 docs/plan-post-probe-v13.md |
+
+---
+
 ## 1. 两个仓库
 
 | 仓库 | 角色 | 说明 |
