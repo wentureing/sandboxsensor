@@ -37,7 +37,7 @@ function decodeChunked(buf) {
   return Buffer.concat(parts);
 }
 
-function request(host, pathname, extraHeaders = {}) {
+function request(host, pathname, extraHeaders = {}, method = 'GET', body = null) {
   return new Promise((resolve, reject) => {
     const headers = {
       'User-Agent': 'sandboxsensor-ci-probe',
@@ -59,7 +59,12 @@ function request(host, pathname, extraHeaders = {}) {
       }
       const s = tls.connect({ socket, servername: host }, () => {
         const head = Object.entries(headers).map(([k, v]) => `${k}: ${v}`).join('\r\n');
-        s.write(`GET ${pathname} HTTP/1.1\r\nHost: ${host}\r\n${head}\r\nConnection: close\r\n\r\n`);
+        const bodyBuf = body == null ? null : Buffer.from(body, 'utf8');
+        const bodyHead = bodyBuf ? `Content-Length: ${bodyBuf.length}\r\n` : '';
+        s.write(
+          `${method} ${pathname} HTTP/1.1\r\nHost: ${host}\r\n${head}\r\n${bodyHead}Connection: close\r\n\r\n`
+        );
+        if (bodyBuf) s.write(bodyBuf);
       });
       const chunks = [];
       s.on('data', (c) => chunks.push(c));
@@ -106,7 +111,37 @@ async function apiGet(pathname, extraHeaders = {}) {
 
 const args = process.argv.slice(2);
 
-if (args[0] === '--asset') {
+if (args[0] === '--dispatch') {
+  // 手动触发 workflow_dispatch
+  // 用法: node tools/gh-api.mjs --dispatch <workflow-file> [workflow-ref] [k=v ...]
+  // 例:   node tools/gh-api.mjs --dispatch container-build.yml main ref=ec12b31
+  const wf = args[1] || 'container-build.yml';
+  const wfRef = args[2] || 'main';
+  const inputs = {};
+  // 支持两种写法：k=v（一个参数）或 k v（两个参数）
+  for (let i = 3; i < args.length; i++) {
+    const a = args[i];
+    const eq = a.indexOf('=');
+    if (eq > 0) {
+      inputs[a.slice(0, eq)] = a.slice(eq + 1);
+    } else if (i + 1 < args.length) {
+      inputs[a] = args[++i];
+    }
+  }
+  const payload = JSON.stringify({ ref: wfRef, inputs });
+  const r = await request(
+    'api.github.com',
+    `/repos/wentureing/sandboxsensor/actions/workflows/${wf}/dispatches`,
+    { Authorization: `Bearer ${token()}`, 'Content-Type': 'application/json' },
+    'POST',
+    payload
+  );
+  console.log(`dispatch ${wf} (workflow-ref=${wfRef}) inputs=${JSON.stringify(inputs)} -> HTTP ${r.status}`);
+  if (r.status !== 204 && r.status !== 200) {
+    console.error(r.body.toString('utf8').slice(0, 400));
+    process.exit(1);
+  }
+} else if (args[0] === '--asset') {
   // 下载 apk-latest 里的某个 asset：node tools/gh-api.mjs --asset <name> [out]
   const name = args[1];
   const out = args[2] || name;
