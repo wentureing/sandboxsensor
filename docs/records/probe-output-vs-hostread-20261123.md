@@ -1,0 +1,104 @@
+# 澄清：探针输出 ≠ 宿主代读（两个方向的操作）
+
+- 日期：2026-11-23
+- 起因：你问「如果宿主代读优先沙箱内路径，我们的探针输出怎么办」
+
+---
+
+## 一、先把两件事分开
+
+| 项 | 主体 | 方向 | 走的机制 |
+| --- | --- | --- | --- |
+| **宿主代读** | **WebView renderer**（isolated uid） | **读** | `shouldInterceptRequest` → 宿主打开 → `WebResourceResponse` stream |
+| **探针输出** | **guest 主进程**（有自己沙箱的读写权限） | **写** | 普通 `FileOutputStream` → 容器的路径重定向 |
+
+**两者不共享代码路径、不共享权限判断、不互相影响。**
+
+**所以：宿主代读"优先沙箱内"不会改变探针输出写到哪里。**
+
+---
+
+## 二、探针输出的真实问题（与代读无关）
+
+实测（Gaia 容器内运行的 v1.7）：
+
+```
+FILE     /data/user/0/com.app.hider.master.pro.cn/gaia/data/user/0/com.sandbox.probe/files/probe-report.json  bytes=12722
+FILE_EXT /storage/emulated/0/Android/data/com.app.hider.master.pro.cn/gaia/com.sandbox.probe/Android/data/com.sandbox.probe…
+```
+
+**`FILE_EXT` 落在 Gaia 的沙箱镜像里，不是真实的 `/sdcard/Android/data/com.sandbox.probe/`。**
+
+→ **在我们容器里同理**：探针的"外部副通道"被 `/sdcard` 重定向规则接管，落到沙箱内。
+
+→ **adb 拉不到**（vivo 上 `/storage/emulated/0/Android/data/<容器>/gaia/.../Android` 是 `Permission denied`）。
+
+**这个问题早就存在，与代读策略无关。** v1.3 加外部副通道时以为能解决，实际只能解决"容器外的直接安装"（那里没有重定向）。
+
+---
+
+## 三、三种解法（探针输出）
+
+| 方案 | 改动 | 效果 | 风险 |
+| --- | --- | --- | --- |
+| **A. 只用 logcat 主通道**（现状） | 0 | 已验证：74 项 / 约 12KB / 10 个分块，能完整还原 | 日志量大时可能被冲掉 |
+| **B. 探针写真实 `/sdcard/Download/`** | 需要容器"写豁免" | adb 直接可拉 | 必须过 `caller_is_guest`，否则 guest 能污染公共目录 |
+| **C. 宿主代读做双源查找**（沙箱优先 → 真实外部兜底） | 中 | 看似能读到真实文件 | **会让 guest 看到宿主真实文件 = 泄漏**，不推荐 |
+
+**推荐：A 已够用；B 归到"导出通道"待办里一起做。**
+
+**为什么 A 够用**：
+- 探针主通道本来就是 logcat（分块 base64），`extract-report.py` 能完整还原
+- 实测在 Gaia 里拿到 74 项、12.7KB，无缺失
+- 文件通道只是"锦上添花"，不是必要条件
+
+---
+
+## 四、"优先沙箱内"这个决定本身是对的
+
+你的实测已经证明：
+
+| 环境 | Via 打开 `file:///sdcard/Download/` |
+| --- | --- |
+| 真机 | 能 |
+| **Gaia 容器内** | **打不开** |
+| 我们容器内 | 打不开（重定向后是沙箱内的空目录） |
+
+**Gaia 和我们行为一致** → 说明"guest 的 `/sdcard` 是沙箱内的"是这类容器的**共同设计**，不是缺陷。
+
+**所以宿主代读"优先沙箱内同名路径"= 与 guest 视角一致 = 与 Gaia 一致 = 正确。**
+
+如果反过来做成"沙箱没有就读真实外部"，会造成：
+
+```
+guest 列 /sdcard/Download → 沙箱内（空）
+guest 打开 /sdcard/Download/x.html → 宿主代读真实路径 → 有内容
+→ 「列目录看不到、直接打开却成功」的诡异不一致
+→ 而且这个真实文件本来不该被 guest 看到
+```
+
+---
+
+## 五、回到你的两条计划
+
+| 计划 | 状态 | 待办 |
+| --- | --- | --- |
+| **A. 测试用容器自己的调试能力** | 已设计（`docs/plan-testing-and-hostread-policy.md`） | 阶段 1–3 待编码 |
+| **B. 宿主代读权限边界** | 已设计（同上，白名单 + 四条硬约束） | 阶段 4 待编码 |
+| **探针输出落盘** | 本文件澄清 | 归入"导出通道"待办（写豁免 + `caller_is_guest`） |
+
+---
+
+## 六、如果之后要编码，建议的起点
+
+按风险从低到高：
+
+1. **`HostReadPolicy` 的纯函数 + Robolectric 单测**（阶段 4 的核心）
+   - 它是纯路径判断，无副作用，最容易写测试
+   - 而且是**安全边界**，价值最高
+2. **`DiagnosticsSink` 接口 + NoOp**（阶段 1）
+   - 纯增量，零行为改变
+3. `:core:diagnostics` 模块 + `SelfCheckRunner`（阶段 2–3）
+   - 需要动 Gradle，跨模块，风险中等
+
+**先做 1** 的理由：它不依赖任何新模块，也不改现有结构，但能立刻把"宿主代读到底允不允许某条路径"变成可自动验证的断言。
