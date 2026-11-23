@@ -173,6 +173,21 @@ node tools/gh-api.mjs "/repos/wentureing/sandboxsensor/actions/runs?per_page=3"
 例外：只有下一步动作**必须以构建产物为前提**（例如要装包验证）时，才单独查一次；
 若仍 in_progress 就留到下一轮再查，不要死等。
 
+## 构建变体与签名
+
+- **CI 构建的是 `:app:assembleDebug`**（`container-build.yml` 的默认 `task` 与执行行）
+  - 设备上的包：`pkgFlags=[ DEBUGGABLE HAS_CODE ... ]`，`run-as` 可用
+  - **`LOGD` 一直可见** —— 排查主力日志级别
+- **`LOGD` 保留，不改 `LOGI`**：release 里没有是预期行为（避免影响 release 效率）。
+  **约定：排查固定用 debug 包**；将来若引入 release 分发，排查时必须换回 debug 包。
+- **签名必须固定**：workflow 的 `Cache debug keystore`（key `android-debug-keystore-v1`）
+  - 不固定 → `install -r` 报 `INSTALL_FAILED_UPDATE_INCOMPATIBLE` → 必须卸载重装
+  - **卸载会清掉两样**：`appops` 授权（如 `MANAGE_EXTERNAL_STORAGE`）**和**沙箱数据（所有 guest）
+  - 所以固定签名不只是"省一次点击"，是保住授权状态和数据
+- **版本号递增**：`versionCode = GITHUB_RUN_NUMBER`、`versionName = 1.0.0-<7位sha>`
+  递增的 versionCode 配合固定 keystore 才能 `adb install -r` 覆盖
+- **现阶段不做 release 分发包**（`app/build.gradle.kts` 没有 `signingConfigs`，也用不到）
+
 ## 其他约定
 
 - **Kotlin KDoc 里禁止出现 /****：Kotlin 块注释**可嵌套**。KDoc 里写路径通配
