@@ -25,7 +25,7 @@ permissions:
 
 # 触发说明：本 workflow 只在自身文件变化或手动 dispatch 时运行。
 # 改完 ShitJumpingVM 后，在此做一个无副作用改动即可触发重建。
-# patch-level: p20（P0: DiagnosticsSink + probe-out 导出）
+# patch-level: p21（P1-2: Robolectric 冒烟测试）
 
 concurrency:
   group: container-${{ github.ref }}
@@ -116,6 +116,31 @@ jobs:
         run: |
           chmod +x ./gradlew
           ./gradlew ${{ inputs.task || ':app:assembleDebug' }} --no-daemon --stacktrace
+
+      # P1-2：Robolectric 单元测试（纯 JVM，不需要模拟器）
+      # 只跑核心模块单测；持续失败不阻塞 APK 产出，但会留 artifact 供排查。
+      - name: Unit tests (Robolectric)
+        working-directory: container
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          ./gradlew :core:sandbox:testDebugUnitTest --no-daemon > /tmp/unit.log 2>&1 || true
+          echo "=== 任务/结果摘要 ==="
+          grep -E "^> Task|FAILED|BUILD |tests? completed|error:" /tmp/unit.log | head -n 40 || echo "none"
+          echo "=== 失败行（仅错误摘要）==="
+          grep -E "FAILED|AssertionError|Caused by:|Exception|error:" /tmp/unit.log | head -n 20 || echo "none"
+          echo "=== 末尾 15 行 ==="
+          tail -n 15 /tmp/unit.log
+
+      - name: Upload unit test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-results
+          path: |
+            container/core/sandbox/build/reports/tests/**/*
+            container/core/sandbox/build/test-results/**/*
+          if-no-files-found: ignore
 
       - name: Collect outputs
         if: always()
