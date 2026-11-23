@@ -22,10 +22,11 @@ on:
 
 permissions:
   contents: write
+  checks: write          # dorny/test-reporter 需要创建 check run
 
 # 触发说明：本 workflow 只在自身文件变化或手动 dispatch 时运行。
 # 改完 ShitJumpingVM 后，在此做一个无副作用改动即可触发重建。
-# patch-level: p24（P1-2: 单测改纯 JUnit，去掉 Robolectric jar 依赖）
+# patch-level: p25（CI: 测试失败变红 + 页面内测试报告）
 
 concurrency:
   group: container-${{ github.ref }}
@@ -118,29 +119,35 @@ jobs:
           ./gradlew ${{ inputs.task || ':app:assembleDebug' }} --no-daemon --stacktrace
 
       # P1-2：Robolectric 单元测试（纯 JVM，不需要模拟器）
-      # 只跑核心模块单测；持续失败不阻塞 APK 产出，但会留 artifact 供排查。
-      - name: Unit tests (Robolectric)
+      # P1-2：纯 JUnit 单测（零下载，秒级）。
+      # 失败时**必须让 job 变红**（不再 continue-on-error）——
+      # p23 曾出现「19 个用例全失败，job 仍显示绿色通过」的误判。
+      - name: Unit tests
         working-directory: container
-        continue-on-error: true
         run: |
           set -o pipefail
-          ./gradlew :core:sandbox:testDebugUnitTest --no-daemon > /tmp/unit.log 2>&1 || true
+          set +e
+          ./gradlew :core:sandbox:testDebugUnitTest --no-daemon > /tmp/unit.log 2>&1
+          rc=$?
+          set -e
           echo "=== 任务/结果摘要 ==="
-          grep -E "^> Task|FAILED|BUILD |tests? completed|error:" /tmp/unit.log | head -n 40 || echo "none"
+          grep -E "^> Task :core:sandbox:test|FAILED|BUILD |tests? completed|error:" /tmp/unit.log | head -n 40 || echo "none"
           echo "=== 失败行（仅错误摘要）==="
           grep -E "FAILED|AssertionError|Caused by:|Exception|error:" /tmp/unit.log | head -n 20 || echo "none"
           echo "=== 末尾 15 行 ==="
           tail -n 15 /tmp/unit.log
+          exit $rc
 
-      - name: Upload unit test results
+      # 测试报告：把 JUnit XML 转成 GitHub check run，失败时在 commit 页面标红并列出用例
+      - name: Publish test report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: dorny/test-reporter@v1
         with:
-          name: unit-test-results
-          path: |
-            container/core/sandbox/build/reports/tests/**/*
-            container/core/sandbox/build/test-results/**/*
-          if-no-files-found: ignore
+          name: Unit test results
+          path: container/core/sandbox/build/test-results/testDebugUnitTest/*.xml
+          reporter: java-junit
+          fail-on-error: true
+          fail-on-empty: false
 
       - name: Collect outputs
         if: always()
