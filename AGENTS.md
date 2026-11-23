@@ -177,7 +177,7 @@ node tools/gh-api.mjs "/repos/wentureing/sandboxsensor/actions/runs?per_page=3"
 
 - **凭据**：`token.txt` 不入库、不读取内容到对话中；脚本内读取后立即用于请求
 - **产物命名**：`<类型>-<7位sha>[-<abi>].apk`
-- **容器 command 通道**：`adb shell am broadcast -n com.nextvm.app/.CmdReceiver -a com.nextvm.cmd.{INSTALL|LAUNCH|LAUNCH_ACTIVITY|UNINSTALL|LIST}`
+- **容器 command 通道**：`adb shell am broadcast -n com.nextvm.app/.CmdReceiver -a com.nextvm.cmd.{INSTALL|LAUNCH|LAUNCH_ACTIVITY|UNINSTALL|LIST|COLLECT_OUT|LIST_OUT|CAT_OUT}`
   - `LAUNCH_ACTIVITY --es pkg <pkg> --es activity <完整类名>`：容器启动 guest 时**只解析 LAUNCHER**，要起非 LAUNCHER 页面必须用这条
   - 结果统一打到 `logcat -d -s CmdReceiver`
   - **导入豁免**（p18）：`/sdcard/Download/`、`/storage/emulated/0/Download/`、`/data/local/tmp/` 可直接 `INSTALL --es path`，不必再 push + run-as 复制
