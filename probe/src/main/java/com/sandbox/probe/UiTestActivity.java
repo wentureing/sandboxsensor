@@ -8,6 +8,8 @@ import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
 
+import org.json.JSONObject;
+
 /**
  * UiTestActivity（v1.5）：专门用于「文字选择 / popup」排查的纯 UI 页面。
  *
@@ -77,6 +79,22 @@ public class UiTestActivity extends Activity {
 
         // 故意不 finish：等待脚本操作或被系统杀掉。
         Log.i(TAG, "UiTestActivity.onCreate leave (will NOT auto-finish)");
+
+        // v1.7：本页同时承担「探针执行入口」。
+        // v1.6 把 LAUNCHER 移到本页后，ProbeActivity 不再被容器拉起，
+        // 导致 J01/P09 等数据拿不到（实测 PROBE 分块 = 0）。
+        // 这里后台跑一次 ProbeRunner，报告仍走 logcat(tag=PROBE) + 文件双通道。
+        new Thread(() -> {
+            JSONObject payload;
+            try {
+                payload = new ProbeRunner(this).run();
+            } catch (Throwable t) {
+                Log.e(TAG, "ProbeRunner fatal: " + t, t);
+                payload = new JSONObject();
+                Report.putFatal(payload, t);
+            }
+            Report.flush(this, payload);
+        }, "probe-runner").start();
     }
 
     @Override
