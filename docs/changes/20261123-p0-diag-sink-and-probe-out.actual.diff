@@ -1,0 +1,325 @@
+diff --git a/app/src/main/java/com/nextvm/app/CmdReceiver.kt b/app/src/main/java/com/nextvm/app/CmdReceiver.kt
+index 1376bf4..0220839 100644
+--- a/app/src/main/java/com/nextvm/app/CmdReceiver.kt
++++ b/app/src/main/java/com/nextvm/app/CmdReceiver.kt
+@@ -3,7 +3,9 @@ package com.nextvm.app
+ import android.content.BroadcastReceiver
+ import android.content.Context
+ import android.content.Intent
++import android.util.Base64
+ import android.util.Log
++import com.nextvm.core.sandbox.SandboxManager
+ import com.nextvm.core.virtualization.engine.VirtualEngine
+ import dagger.hilt.EntryPoint
+ import dagger.hilt.InstallIn
+@@ -50,6 +52,7 @@ class CmdReceiver : BroadcastReceiver() {
+     @InstallIn(SingletonComponent::class)
+     interface CmdEntryPoint {
+         fun engine(): VirtualEngine
++        fun sandbox(): SandboxManager
+     }
+ 
+     override fun onReceive(context: Context, intent: Intent) {
+@@ -63,6 +66,16 @@ class CmdReceiver : BroadcastReceiver() {
+             Log.e(TAG, "engine unavailable: ${t.message}", t)
+             return
+         }
++        // 探针输出导出用的沙箱管理器（与 engine 分开取，任一方缺失不影响另一方）
++        val sandbox = try {
++            EntryPointAccessors.fromApplication(
++                context.applicationContext,
++                CmdEntryPoint::class.java
++            ).sandbox()
++        } catch (t: Throwable) {
++            Log.e(TAG, "sandbox unavailable: ${t.message}", t)
++            null
++        }
+ 
+         when (action) {
+             ACTION_INSTALL -> {
+@@ -126,10 +139,100 @@ class CmdReceiver : BroadcastReceiver() {
+                 }
+             }
+ 
++            ACTION_COLLECT_OUT -> {
++                if (sandbox == null) {
++                    Log.e(TAG, "COLLECT_OUT: sandbox unavailable")
++                    return
++                }
++                try {
++                    val collected = sandbox.collectProbeOutput()
++                    collected.forEach {
++                        Log.i(
++                            TAG,
++                            "COLLECT instance=${it.instanceId} name=${it.name} " +
++                                "bytes=${it.bytes} sha=${it.sha256.take(8)}"
++                        )
++                    }
++                    Log.i(TAG, "COLLECT_OUT done files=${collected.size}")
++                } catch (t: Throwable) {
++                    Log.e(TAG, "COLLECT_OUT failed: ${t.message}", t)
++                }
++            }
++
++            ACTION_LIST_OUT -> {
++                if (sandbox == null) {
++                    Log.e(TAG, "LIST_OUT: sandbox unavailable")
++                    return
++                }
++                try {
++                    val list = sandbox.listProbeOutput()
++                    list.forEach {
++                        Log.i(
++                            TAG,
++                            "OUT ${it.instanceId} ${it.name} ${it.bytes} sha=${it.sha256.take(8)}"
++                        )
++                    }
++                    Log.i(TAG, "LIST_OUT done files=${list.size}")
++                } catch (t: Throwable) {
++                    Log.e(TAG, "LIST_OUT failed: ${t.message}", t)
++                }
++            }
++
++            ACTION_CAT_OUT -> {
++                if (sandbox == null) {
++                    Log.e(TAG, "CAT_OUT: sandbox unavailable")
++                    return
++                }
++                val instance = intent.getStringExtra("instance")
++                val name = intent.getStringExtra("name")
++                if (instance.isNullOrBlank() || name.isNullOrBlank()) {
++                    Log.w(TAG, "CAT_OUT: missing --es instance / --es name")
++                    return
++                }
++                val bytes = sandbox.readProbeOutput(instance, name)
++                if (bytes == null) {
++                    Log.e(
++                        TAG,
++                        "CAT_OUT failed: invalid or missing instance=$instance name=$name " +
++                            "(instance 只允许字母数字._- 且不含 ..；name 必须白名单)"
++                    )
++                    return
++                }
++                emitOutChunks(instance, name, bytes)
++            }
++
+             else -> Log.w(TAG, "unknown action: $action")
+         }
+     }
+ 
++    /**
++     * 把文件内容分块 base64 打到 logcat。
++     *
++     * 格式与探针的 `REPORT v1 part i/n` 同构，[tools/extract-report.py] 的分块还原逻辑
++     * 可以直接复用；`end` 行带 sha256，便于校验完整性。
++     */
++    private fun emitOutChunks(instance: String, name: String, bytes: ByteArray) {
++        val chunkSize = 3 * 1024 // 原始 3KB -> base64 约 4KB，留出 logcat 单行余量
++        val total = if (bytes.isEmpty()) 0 else (bytes.size + chunkSize - 1) / chunkSize
++        for (i in 0 until total) {
++            val from = i * chunkSize
++            val to = minOf(from + chunkSize, bytes.size)
++            val b64 = Base64.encodeToString(bytes.copyOfRange(from, to), Base64.NO_WRAP)
++            Log.i(TAG, "OUTCHUNK v1 part ${i + 1}/$total $b64")
++        }
++        val sha = try {
++            val md = java.security.MessageDigest.getInstance("SHA-256")
++            md.update(bytes)
++            md.digest().joinToString("") { "%02x".format(it) }
++        } catch (t: Throwable) {
++            "?"
++        }
++        Log.i(
++            TAG,
++            "OUTCHUNK v1 end instance=$instance name=$name parts=$total bytes=${bytes.size} sha=$sha"
++        )
++    }
++
+     companion object {
+         private const val TAG = "CmdReceiver"
+         const val ACTION_INSTALL = "com.nextvm.cmd.INSTALL"
+@@ -137,5 +240,10 @@ class CmdReceiver : BroadcastReceiver() {
+         const val ACTION_LAUNCH_ACTIVITY = "com.nextvm.cmd.LAUNCH_ACTIVITY"
+         const val ACTION_UNINSTALL = "com.nextvm.cmd.UNINSTALL"
+         const val ACTION_LIST = "com.nextvm.cmd.LIST"
++
++        // --- 探针输出导出（P0-2）---
++        const val ACTION_COLLECT_OUT = "com.nextvm.cmd.COLLECT_OUT"
++        const val ACTION_LIST_OUT = "com.nextvm.cmd.LIST_OUT"
++        const val ACTION_CAT_OUT = "com.nextvm.cmd.CAT_OUT"
+     }
+ }
+diff --git a/core/sandbox/src/main/java/com/nextvm/core/sandbox/SandboxManager.kt b/core/sandbox/src/main/java/com/nextvm/core/sandbox/SandboxManager.kt
+index 06427a8..ae6b614 100644
+--- a/core/sandbox/src/main/java/com/nextvm/core/sandbox/SandboxManager.kt
++++ b/core/sandbox/src/main/java/com/nextvm/core/sandbox/SandboxManager.kt
+@@ -64,6 +64,16 @@ class SandboxManager @Inject constructor(
+             "Recordings",
+             "Ringtones"
+         )
++
++        /** 探针输出里允许收集的文件名（白名单，不做通配）。 */
++        private val PROBE_OUTPUT_NAMES = listOf(
++            "probe-report.json",
++            "probe-early.json",
++            "selfcheck.json"
++        )
++
++        /** 导出目录名（与沙箱根 files/virtual 平级，guest 看不到）。 */
++        private const val PROBE_OUT_DIR = "probe-out"
+     }
+ 
+     private val dataRoot = File(virtualRoot, VirtualConstants.VIRTUAL_DATA_DIR)
+@@ -372,4 +382,146 @@ class SandboxManager @Inject constructor(
+ 
+         return path
+     }
++
++    // ==================== 探针输出收集（sandboxsensor P0-2）====================
++
++    /** 已收集 / 已导出的一份探针输出。 */
++    data class CollectedFile(
++        val instanceId: String,
++        val name: String,
++        val bytes: Long,
++        val sha256: String
++    )
++
++    /** 导出目录：与沙箱根 `files/virtual` 平级，不参与 guest 路径翻译，guest 看不到。 */
++    val probeOutRoot: File
++        get() = File(context.filesDir, PROBE_OUT_DIR)
++
++    /**
++     * 把各 guest 沙箱里的探针输出收集到容器私有目录。
++     *
++     * ⚠️ 用真实沙箱根 `files/virtual/data`，**不用** `virtualRoot`：
++     *    后者是 `app_virtual`（本类的注入根，实测是空壳），
++     *    真实 guest 数据在 `files/virtual/data`。
++     *    详见 docs/records/记录-双轨沙箱路径诊断.md
++     */
++    fun collectProbeOutput(): List<CollectedFile> {
++        val realDataRoot = File(
++            context.filesDir,
++            "${VirtualConstants.VIRTUAL_DIR}/${VirtualConstants.VIRTUAL_DATA_DIR}"
++        )
++        val outRoot = probeOutRoot.apply { mkdirs() }
++        val results = mutableListOf<CollectedFile>()
++
++        val instances = realDataRoot.listFiles() ?: return emptyList()
++        for (inst in instances) {
++            if (!inst.isDirectory) continue
++            val filesDir = File(inst, "files")
++            if (!filesDir.isDirectory) continue
++            for (name in PROBE_OUTPUT_NAMES) {
++                val src = File(filesDir, name)
++                if (!src.isFile) continue
++                val dstDir = File(outRoot, inst.name).apply { mkdirs() }
++                val dst = File(dstDir, name)
++                val copied = runCatching { src.copyTo(dst, overwrite = true) }
++                    .getOrElse { e ->
++                        Timber.tag(TAG).w(e, "collect %s/%s failed", inst.name, name)
++                        null
++                    } ?: continue
++                val sha = sha256Of(dst)
++                runCatching {
++                    File(dstDir, "meta.txt").writeText(
++                        "instance=${inst.name}\n" +
++                            "name=$name\n" +
++                            "src=${src.absolutePath}\n" +
++                            "dst=${dst.absolutePath}\n" +
++                            "bytes=${dst.length()}\n" +
++                            "sha256=$sha\n" +
++                            "collectedAt=${System.currentTimeMillis()}\n"
++                    )
++                }
++                results += CollectedFile(inst.name, name, copied.length(), sha)
++            }
++        }
++        writeProbeOutIndex(outRoot, results)
++        Timber.tag(TAG).i("collectProbeOutput: %d file(s)", results.size)
++        return results
++    }
++
++    /** 列出已收集的文件（供 CmdReceiver 的 LIST_OUT 用）。 */
++    fun listProbeOutput(): List<CollectedFile> {
++        val out = mutableListOf<CollectedFile>()
++        val instDirs = probeOutRoot.listFiles() ?: return emptyList()
++        for (instDir in instDirs) {
++            if (!instDir.isDirectory) continue
++            val fs = instDir.listFiles() ?: continue
++            for (f in fs) {
++                if (f.isFile && PROBE_OUTPUT_NAMES.contains(f.name)) {
++                    out += CollectedFile(instDir.name, f.name, f.length(), sha256Of(f))
++                }
++            }
++        }
++        return out.sortedWith(compareBy({ it.instanceId }, { it.name }))
++    }
++
++    /**
++     * 读取指定导出文件。instance 或 name 不合法、文件不存在则返回 null。
++     *
++     * 校验：
++     *   * instance 只允许 `[A-Za-z0-9._-]`，长度 <= 128，且不含 `..`
++     *   * name 必须在白名单里（不做通配）
++     */
++    fun readProbeOutput(instanceId: String, name: String): ByteArray? {
++        if (!isSafeInstanceId(instanceId)) return null
++        if (!PROBE_OUTPUT_NAMES.contains(name)) return null
++        val f = File(File(probeOutRoot, instanceId), name)
++        if (!f.isFile) return null
++        return runCatching { f.readBytes() }.getOrNull()
++    }
++
++    private fun isSafeInstanceId(s: String): Boolean {
++        if (s.isEmpty() || s.length > 128) return false
++        if (s.contains("..")) return false
++        for (c in s) {
++            val ok = c.isLetterOrDigit() || c == '.' || c == '_' || c == '-'
++            if (!ok) return false
++        }
++        return true
++    }
++
++    private fun sha256Of(f: File): String = try {
++        val md = java.security.MessageDigest.getInstance("SHA-256")
++        f.inputStream().use { ins ->
++            val buf = ByteArray(8192)
++            while (true) {
++                val n = ins.read(buf)
++                if (n <= 0) break
++                md.update(buf, 0, n)
++            }
++        }
++        md.digest().joinToString("") { "%02x".format(it) }
++    } catch (t: Throwable) {
++        Timber.tag(TAG).w(t, "sha256 failed for %s", f.name)
++        "?"
++    }
++
++    private fun writeProbeOutIndex(root: File, items: List<CollectedFile>) {
++        val sb = StringBuilder("[\n")
++        items.forEachIndexed { i, c ->
++            sb.append("  {\"instance\":\"")
++                .append(c.instanceId)
++                .append("\",\"name\":\"")
++                .append(c.name)
++                .append("\",\"bytes\":")
++                .append(c.bytes)
++                .append(",\"sha256\":\"")
++                .append(c.sha256)
++                .append("\"}")
++            if (i != items.lastIndex) sb.append(',')
++            sb.append('\n')
++        }
++        sb.append("]\n")
++        runCatching { File(root, "index.json").writeText(sb.toString()) }
++            .onFailure { Timber.tag(TAG).w(it, "write index.json failed") }
++    }
+ }
+ app/src/main/java/com/nextvm/app/CmdReceiver.kt    | 108 +++++++++++++++
+ .../java/com/nextvm/core/sandbox/SandboxManager.kt | 152 +++++++++++++++++++++
+ 2 files changed, 260 insertions(+)
+ M app/src/main/java/com/nextvm/app/CmdReceiver.kt
+ M core/sandbox/src/main/java/com/nextvm/core/sandbox/SandboxManager.kt
+?? core/virtualization/src/main/java/com/nextvm/core/virtualization/diag/DiagnosticsSink.kt
