@@ -264,6 +264,48 @@ Java_com_sandbox_probe_NativeProbe_runAll(JNIEnv* env, jclass /*clazz*/, jstring
         }
     }
 
+    // ---- P28 导入通道写越权探测（sandboxsensor）----
+    // 目的：验证 is_import_read_exempt 是否让 guest 能写**真实的** /sdcard/Download。
+    //
+    // 为什么用 fopen 而不是 open：
+    //   p28 给 hooked_fopen 加了豁免，条件是 mode[0]=='r'，而 "r+" 也满足 ->
+    //   理论上会被放行。而写走的是 fwrite -> write()，write 没有被 hook，
+    //   所以"放行 fopen"能否变成"真的写进去"必须实测。
+    //
+    // 判据不在本函数里：外部用 adb 读 /sdcard/Download/probe-wtest.txt
+    //   仍是 ORIGINAL -> 写被拦（缺陷不成立 / 修复生效）
+    //   变成 HACKED   -> 真实文件被改（缺陷成立）
+    // 这里只记录 fopen/fwrite 的返回值，供三版对比（p26 无豁免 / p28 有缺陷 / p29 已修）。
+    {
+        const char* wt = "/sdcard/Download/probe-wtest.txt";
+        std::string r;
+
+        FILE* fr = fopen(wt, "r");
+        r += "fopen_r=";
+        r += fr ? "ok" : Errcode("fopen_r");
+        if (fr) fclose(fr);
+
+        FILE* frp = fopen(wt, "r+");
+        r += " fopen_rplus=";
+        r += frp ? "ok" : Errcode("fopen_rplus");
+        if (frp) {
+            size_t w = fwrite("HACKED", 1, 6, frp);
+            fflush(frp);
+            fclose(frp);
+            r += " fwrite=" + std::to_string(w);
+        }
+
+        // 用 stat 看真实文件大小，作为第二判据（容器外还会再核一次内容）
+        struct stat wst {};
+        if (stat(wt, &wst) == 0) {
+            r += " size=" + std::to_string(static_cast<long long>(wst.st_size));
+        } else {
+            r += " size=" + Errcode("stat_wtest");
+        }
+
+        add("P28.sdcard_write", frp != nullptr, r);
+    }
+
     if (fd >= 0) close(fd);
     return env->NewStringUTF(g_out.c_str());
 }
