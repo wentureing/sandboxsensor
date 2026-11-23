@@ -42,11 +42,12 @@
 见 **`docs/计划-提升路线图.md`**（P0/P1/P2 完整设计 + 验收标准）。
 
 ```
-P0-1 DiagnosticsSink 接口 + NoOp          0.5d  风险零
-P0-2 probe-out + CmdReceiver 三命令       0.75d 风险低
-P1-2 HostReadPolicy + Robolectric 单测    1d    纯函数
-P1-1 :core:diagnostics + SelfCheckRunner  1.5d
-P1-3 WebView 宿主代读最小版                2-3d  需先验证
+P0-1 DiagnosticsSink 接口 + NoOp          ✅ 完成 a7650f2
+P0-2 probe-out + CmdReceiver 三命令       ✅ 完成 a7650f2（COLLECT/LIST 实测通过，CAT_OUT 待 p27+ 验证）
+P0-3 进程分割 + 删除路径豁免               ⏭ 下一步（p18 的 /sdcard/Download 豁免从根上无效）
+P1-2 HostReadPolicy + 17 条纯 JUnit       ✅ 完成 0cef67f（p26 CI 全绿）
+P1-1 :core:diagnostics + SelfCheckRunner  待 P0-3 之后
+P1-3 WebView 宿主代读最小版                需先验证 Gaia 机制（探针 v1.8）
 ```
 
 **下一步应该是**：落盘 `docs/changes/20261123-*.md` 修改计划 → 等确认 → 编码。
