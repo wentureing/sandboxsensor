@@ -19,7 +19,10 @@ import { fileURLToPath } from 'node:url';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const TOKEN_FILE = path.join(ROOT, 'token.txt');
 const OUT_FILE = path.join(ROOT, 'probe-reports', 'gh-out.json');
-const PROXY = { host: '127.0.0.1', port: 12450 };
+const PROXY = {
+  host: process.env.GH_PROXY_HOST || '127.0.0.1',
+  port: Number(process.env.GH_PROXY_PORT || 7897),
+};
 const OWNER = 'wentureing';
 const REPO = 'sandboxsensor';
 

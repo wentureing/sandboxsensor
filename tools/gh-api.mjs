@@ -11,7 +11,10 @@ import { fileURLToPath } from 'node:url';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const TOKEN_FILE = path.join(ROOT, 'token.txt');
 const OUT_FILE = path.join(ROOT, 'probe-reports', 'gh-out.json');
-const PROXY = { host: '127.0.0.1', port: 12450 };
+const PROXY = {
+  host: process.env.GH_PROXY_HOST || '127.0.0.1',
+  port: Number(process.env.GH_PROXY_PORT || 7897),
+};
 
 function token() {
   const t = fs.readFileSync(TOKEN_FILE, 'utf8').trim();
@@ -81,11 +84,11 @@ function request(host, pathname, extraHeaders = {}) {
   });
 }
 
-async function apiGet(pathname) {
+async function apiGet(pathname, extraHeaders = {}) {
   const host = 'api.github.com';
   let p = pathname;
   for (let hop = 0; hop < 4; hop++) {
-    const r = await request(host, p, { Authorization: `Bearer ${token()}` });
+    const r = await request(host, p, { Authorization: `Bearer ${token()}`, ...extraHeaders });
     if (r.status >= 300 && r.status < 400 && r.location) {
       // 日志下载会跳到 S3 预签名 URL：此时不能再带 Authorization
       if (r.location.startsWith('https://')) {
@@ -103,7 +106,37 @@ async function apiGet(pathname) {
 
 const args = process.argv.slice(2);
 
-if (args[0] === '--logs') {
+if (args[0] === '--asset') {
+  // 下载 apk-latest 里的某个 asset：node tools/gh-api.mjs --asset <name> [out]
+  const name = args[1];
+  const out = args[2] || name;
+  if (!name) {
+    console.error('usage: gh-api.mjs --asset <asset-name> [out-file]');
+    process.exit(2);
+  }
+  const rel = await apiGet('/repos/wentureing/sandboxsensor/releases/tags/apk-latest');
+  if (rel.status !== 200) {
+    console.error(`get release failed: HTTP ${rel.status}`);
+    process.exit(1);
+  }
+  const release = JSON.parse(rel.body.toString('utf8'));
+  const asset = (release.assets || []).find((a) => a.name === name);
+  if (!asset) {
+    console.error(`asset not found: ${name}`);
+    console.error('available: ' + (release.assets || []).map((a) => a.name).join(', '));
+    process.exit(1);
+  }
+  const r = await apiGet(`/repos/wentureing/sandboxsensor/releases/assets/${asset.id}`, {
+    Accept: 'application/octet-stream',
+  });
+  if (r.status !== 200) {
+    console.error(`download failed: HTTP ${r.status}`);
+    process.exit(1);
+  }
+  fs.mkdirSync(path.dirname(path.resolve(out)), { recursive: true });
+  fs.writeFileSync(out, r.body);
+  console.log(`saved ${out} (${r.body.length} bytes)`);
+} else if (args[0] === '--logs') {
   const runId = args[1];
   const out = args[2] || `probe-reports/run-${runId}-logs.zip`;
   const r = await apiGet(`/repos/wentureing/sandboxsensor/actions/runs/${runId}/logs`);
