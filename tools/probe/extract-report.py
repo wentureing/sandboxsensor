@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """从 logcat 文本里提取所有完整的 REPORT / EARLY 分块序列并还原为 JSON。
 
-用法: python tools/extract-report.py <logcat.txt>
+用法: python tools/probe/extract-report.py <logcat.txt>
 输出: 与日志同目录的 report-<name>-<n>.json / early-<name>-<n>.json
 """
 import base64

@@ -33,11 +33,11 @@ $env:GIT_SSH='C:\Windows\System32\OpenSSH\ssh.exe'; git push origin main
 
 ### 方法 2（备选）：token + HTTPS
 
-仅在 SSH 不通时使用。脚本已就绪：`tools/push-https.ps1`
+仅在 SSH 不通时使用。脚本已就绪：`tools/git/push-https.ps1`
 
 ```powershell
 git remote set-url origin https://github.com/wentureing/sandboxsensor.git
-.\tools\push-https.ps1            # 默认推 main
+.\tools/git/push-https.ps1            # 默认推 main
 ```
 
 约束：
@@ -50,7 +50,7 @@ git remote set-url origin https://github.com/wentureing/sandboxsensor.git
 ### 故障排查顺序
 
 1. `ssh -T git@github.com`（8s 超时）→ 通就**用方法 1**
-2. 不通 → `.\tools\push-https.ps1` → 通就**用方法 2**
+2. 不通 → `.\tools/git/push-https.ps1` → 通就**用方法 2**
 3. 两者都不通 → 先修网络（本机代理 `127.0.0.1:12450`），再回到 1
 
 ## 接管控制时的硬约束
@@ -163,7 +163,7 @@ git -C _ref/ShitJumpingVM diff --stat >> docs/changes/<date>-<task>.actual.diff
 需要结果时再单独查一次：
 
 `powershell
-node tools/gh-api.mjs "/repos/wentureing/sandboxsensor/actions/runs?per_page=3"
+node tools/release/gh-api.mjs "/repos/wentureing/sandboxsensor/actions/runs?per_page=3"
 # 看 status / conclusion / head_sha
 `
 

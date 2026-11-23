@@ -12,7 +12,7 @@
       4. 打印最终 versionName / lastUpdateTime
 
 .EXAMPLE
-    .\tools\install-and-wait.ps1 -Apk dist\container-shitjumpingvm-74595e5.apk
+    .\tools\device\install-and-wait.ps1 -Apk dist\container-shitjumpingvm-74595e5.apk
 #>
 param(
     [Parameter(Mandatory = $true)][string]$Apk,

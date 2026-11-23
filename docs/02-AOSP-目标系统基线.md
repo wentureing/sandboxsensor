@@ -111,8 +111,8 @@
 
 > **归档状态：11/11 成功**。`developer.android.com` / `source.android.com` 直连与本机 7897 代理均失败（沙箱内 Schannel 报 `SEC_E_NO_CREDENTIALS`），改用 **`127.0.0.1:12450` + Node（OpenSSL）+ HTTP CONNECT** 抓取成功。
 >
-> - 抓取脚本：`tools/fetch-aosp.mjs`（`node tools/fetch-aosp.mjs 127.0.0.1:12450`，自动跟随 Google 的 `oauth2authorize` 跳转链）
-> - 正文提取：`tools/html2txt.py`（HTML → 纯文本，便于 grep）
+> - 抓取脚本：`tools/misc/fetch-aosp.mjs`（`node tools/misc/fetch-aosp.mjs 127.0.0.1:12450`，自动跟随 Google 的 `oauth2authorize` 跳转链）
+> - 正文提取：`tools/misc/html2txt.py`（HTML → 纯文本，便于 grep）
 > - 归档目录：`_ref/aosp/raw/`（11 个 `.html` + 11 个同名 `.txt`）
 >
 > 后续核对规范时**优先读本地 `.txt`**，不要再依赖联网。

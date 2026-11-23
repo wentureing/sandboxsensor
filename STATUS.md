@@ -81,7 +81,7 @@ _ref/aosp/raw        AOSP 官方文档归档
 | `build-container` | push（仅 workflow 自身）+ 手动 | `container-shitjumpingvm-<7位sha>.apk` |
 
 **产物形态**：Release tag `apk-latest`，下载即 `.apk` 原文件，**不经过 artifact zip**。
-**Release 只保留最新一组**（`tools/gh-clean-release.mjs`）。
+**Release 只保留最新一组**（`tools/release/gh-clean-release.mjs`）。
 
 ---
 
@@ -158,8 +158,8 @@ adb logcat -d -s CmdReceiver
 adb logcat -d -b all -v threadtime > probe-reports/dump-$(Get-Date -f HHmmss).txt
 
 # 提取报告
-python tools/extract-report.py probe-reports/dump-*.txt
+python tools/probe/extract-report.py probe-reports/dump-*.txt
 
 # Gaia 全流程自动化
-.\tools\gaia-test.ps1
+.\tools/device/gaia-test.ps1
 ```

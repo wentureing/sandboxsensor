@@ -10,15 +10,15 @@
 .EXAMPLE
   # T1：手动安装后采集 golden 基线
   adb install -r -t .\probe-debug.apk
-  .\tools\collect-probe.ps1 -Mode installed
+  .\tools\device\collect-probe.ps1 -Mode installed
 
 .EXAMPLE
   # T2：手动在容器里导入并启动后采集
-  .\tools\collect-probe.ps1 -Mode container
+  .\tools\device\collect-probe.ps1 -Mode container
 
 .EXAMPLE
   # 需要脚本代劳安装时
-  .\tools\collect-probe.ps1 -Apk .\probe-debug.apk -Mode installed -Install
+  .\tools\device\collect-probe.ps1 -Apk .\probe-debug.apk -Mode installed -Install
 #>
 [CmdletBinding()]
 param(

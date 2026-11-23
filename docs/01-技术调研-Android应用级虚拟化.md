@@ -471,7 +471,7 @@ nativeLibraryDir == dlopen 成功路径 == maps 中模块路径
 
 **AOSP 规范（已本地归档）**
 - 归档目录 `_ref/aosp/raw/`（11 个页面，HTML + 纯文本），说明见 `_ref/aosp/README.md`
-- 抓取工具：`tools/fetch-aosp.mjs`（Node + `127.0.0.1:12450` 代理 + HTTP CONNECT + 跟随跳转）、`tools/html2txt.py`
+- 抓取工具：`tools/misc/fetch-aosp.mjs`（Node + `127.0.0.1:12450` 代理 + HTTP CONNECT + 跟随跳转）、`tools/misc/html2txt.py`
 - 目标系统与逐版本限制：`02-AOSP-目标系统基线.md`
 
 **本系列其他调查文档**

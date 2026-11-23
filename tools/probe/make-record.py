@@ -2,7 +2,7 @@
 """把探针报告转成可读的 Markdown 记录，便于归档与 T1/T2 对照。
 
 用法:
-    python tools/make-record.py probe-reports/report-installed-XXXX.json
+    python tools/probe/make-record.py probe-reports/report-installed-XXXX.json
 输出:
     records/<mode>-<model>-<stamp>.md
 """

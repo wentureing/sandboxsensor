@@ -16,11 +16,11 @@
       * 失败会打印当前 UI 的可见文本，便于当场定位
 
 .EXAMPLE
-    .\tools\gaia-test.ps1
+    .\tools\device\gaia-test.ps1
     # 完整流程
 
 .EXAMPLE
-    .\tools\gaia-test.ps1 -SkipLaunch
+    .\tools\device\gaia-test.ps1 -SkipLaunch
     # 只采集（探针已经在跑）
 #>
 param(
@@ -201,7 +201,7 @@ Write-Host "  日志: $log  ($sizeMb MB)  REPORT 分块=$blocks"
 
 if ($blocks -gt 0) {
     Push-Location $w
-    python tools/extract-report.py $log 2>&1 | Select-Object -Last 3 | ForEach-Object { "  $_" }
+    python tools/probe/extract-report.py $log 2>&1 | Select-Object -Last 3 | ForEach-Object { "  $_" }
     Pop-Location
 } else {
     Write-Host '  没有 REPORT 分块：探针可能没跑到 ProbeRunner，或还没跑完' -ForegroundColor Yellow

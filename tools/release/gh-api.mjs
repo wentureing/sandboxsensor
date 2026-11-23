@@ -1,7 +1,7 @@
 // GitHub API 客户端（token 从 token.txt 读取，绝不打印）
 // 用法:
-//   node tools/gh-api.mjs <api-path>            # 输出 JSON（大字段截断）
-//   node tools/gh-api.mjs --logs <run-id> <out> # 下载 run 日志 zip
+//   node tools/release/gh-api.mjs <api-path>            # 输出 JSON（大字段截断）
+//   node tools/release/gh-api.mjs --logs <run-id> <out> # 下载 run 日志 zip
 import fs from 'node:fs';
 import http from 'node:http';
 import tls from 'node:tls';
@@ -113,8 +113,8 @@ const args = process.argv.slice(2);
 
 if (args[0] === '--dispatch') {
   // 手动触发 workflow_dispatch
-  // 用法: node tools/gh-api.mjs --dispatch <workflow-file> [workflow-ref] [k=v ...]
-  // 例:   node tools/gh-api.mjs --dispatch container-build.yml main ref=ec12b31
+  // 用法: node tools/release/gh-api.mjs --dispatch <workflow-file> [workflow-ref] [k=v ...]
+  // 例:   node tools/release/gh-api.mjs --dispatch container-build.yml main ref=ec12b31
   const wf = args[1] || 'container-build.yml';
   const wfRef = args[2] || 'main';
   const inputs = {};
@@ -142,7 +142,7 @@ if (args[0] === '--dispatch') {
     process.exit(1);
   }
 } else if (args[0] === '--asset') {
-  // 下载 apk-latest 里的某个 asset：node tools/gh-api.mjs --asset <name> [out]
+  // 下载 apk-latest 里的某个 asset：node tools/release/gh-api.mjs --asset <name> [out]
   const name = args[1];
   const out = args[2] || name;
   if (!name) {

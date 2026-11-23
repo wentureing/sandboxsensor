@@ -1,8 +1,8 @@
 // 清理 apk-latest Release 里的旧 assets：只保留最新的容器包与探针包。
 //
 // 用法:
-//   node tools/gh-clean-release.mjs            # 干跑，只列出将要删除的
-//   node tools/gh-clean-release.mjs --apply    # 真正删除
+//   node tools/release/gh-clean-release.mjs            # 干跑，只列出将要删除的
+//   node tools/release/gh-clean-release.mjs --apply    # 真正删除
 //
 // 保留规则（按名字前缀取 mtime/size 最大者不可靠，直接按「最新构建的 SHA」）：
 //   由调用方通过环境变量或 argv 指定要保留的完整文件名：

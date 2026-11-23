@@ -2,7 +2,7 @@
 """对比两份探针报告（T1 直接安装 vs T2 容器内），输出差异表。
 
 用法:
-    python tools/diff-report.py probe-reports/report-installed-*.json \
+    python tools/probe/diff-report.py probe-reports/report-installed-*.json \
                                  probe-reports/report-container-*.json
 """
 import json

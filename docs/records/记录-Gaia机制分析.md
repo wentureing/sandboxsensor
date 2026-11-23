@@ -112,7 +112,7 @@ ls: Permission denied                    ← 被拒（/storage/emulated/0 路径
 **所以观察容器内部状态，唯一可靠的手段是「在容器内运行的探针」**，
 不是 adb 文件系统访问，也不是 logcat 反推。
 
-### 4.2 自动化流程（`tools/gaia-test.ps1`）
+### 4.2 自动化流程（`tools/device/gaia-test.ps1`）
 
 ```
 启动 Gaia → 按文本找探针图标 → 点「授予」→ 等进程 → 抓 logcat → 提取报告

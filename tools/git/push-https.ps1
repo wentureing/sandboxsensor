@@ -1,7 +1,7 @@
 # 通过 HTTPS + token 推送，token 不打印、不出现在 URL、不做持久化配置。
 # 仅从 token.txt 读取（该文件已被 .gitignore 排除）。
 #
-# 用法: .\tools\push-https.ps1 [-RemoteUrl <url>] [-Branch main]
+# 用法: .\tools\git\push-https.ps1 [-RemoteUrl <url>] [-Branch main]
 [CmdletBinding()]
 param(
     [string]$RemoteUrl = "https://github.com/wentureing/sandboxsensor.git",

@@ -10,7 +10,7 @@
   * 宿主机 stdin 重定向不可靠（只传 200 字节）→ 用设备端 cat 管道
 
 .EXAMPLE
-  .\tools\auto-test.ps1 -ProbeApk .\dist\probe-xxx.apk
+  .\tools\device\auto-test.ps1 -ProbeApk .\dist\probe-xxx.apk
 #>
 [CmdletBinding()]
 param(
@@ -66,7 +66,7 @@ function Stage([string]$name, [int]$WaitSec, [int]$Expect) {
     $rp = ($l | Select-String "REPORT v1 part").Count
     $cr = ($l | Select-String "am_crash").Count
     Info ("{0}: PHASE={1} REPORT块={2} crash={3} marker={4}" -f $name, $ph, $rp, $cr, $(if ($hit) { 'yes' } else { 'timeout' }))
-    $null = & python tools\extract-report.py $log 2>&1 | Where-Object { $_ -match 'report-|early-' } | ForEach-Object { Info ("  " + $_.Trim()) }
+    $null = & python tools\probe\extract-report.py $log 2>&1 | Where-Object { $_ -match 'report-|early-' } | ForEach-Object { Info ("  " + $_.Trim()) }
     return [pscustomobject]@{ Name = $name; Phases = $ph; Chunks = $rp; Crashes = $cr; Log = $log }
 }
 

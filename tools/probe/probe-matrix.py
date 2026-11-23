@@ -2,7 +2,7 @@
 """把多份探针报告排成一张矩阵表，方便横向比较不同的虚拟环境。
 
 用法:
-    python tools/probe-matrix.py 报告1.json 报告2.json [...] [-o matrix.md]
+    python tools/probe/probe-matrix.py 报告1.json 报告2.json [...] [-o matrix.md]
 
 报告来源优先顺序:
     1) probe-reports/report-*.json      （collect-probe.ps1 / extract-report.py 产出）
