@@ -253,3 +253,90 @@ adb shell appops get com.nextvm.app MANAGE_EXTERNAL_STORAGE
 3. **拆 `SystemServiceProxyManager.kt`**（3,273 行 → 按服务类型拆；中等风险）
 
 **不建议动**：`VirtualApplicationManager.kt` 和 `ActivityThreadHook.kt`（核心逻辑，拆分回归成本高，且当前功能正常）。
+
+
+人类手动补充的对话：
+
+两张图都生成了（`ef58c38`），dot 源码入库，PNG 被 ignore。
+
+## 图 1：核心类图（`docs/diagrams/core-classes.dot`）
+
+**编码的信息**：
+
+| 视觉编码 | 含义 |
+|---|---|
+| **节点面积** | ∝ 类的代码行数（`VirtualApplicationManager` 3924 行最大，`StubRegistry` 156 行最小） |
+| **边宽** | ∝ 引用次数 |
+| **箭头 A→B** | A 需要 B |
+| **实线/虚线** | 实线=单向依赖，虚线=**回指（存在双向）** |
+| **颜色** | 蓝=引擎，橙/黄=virtualization，绿=services/binder，紫=hook，黄=sandbox |
+
+**读出来的结构**：
+
+```
+VirtualEngine 在左侧，出度 11（唯一门面）
+  ├─ StubRegistry(7)               ← 最强，3.2pt
+  ├─ ActivityThreadHook(6)
+  ├─ VirtualResourceManager(5)
+  ├─ SystemServiceProxyManager(4)  ← 虚线回指
+  ├─ VirtualApplicationManager(3)  ← 虚线回指
+  ├─ VirtualMultiProcessManager(3)
+  ├─ VirtualWindowManager(3)
+  ├─ NativeHookBridge(3)           ← 虚线回指
+  ├─ SandboxManager(3)
+  ├─ PackageManagerProxy(2)        ← 虚线回指
+  └─ ActivityManagerProxy(1)       ← 虚线回指
+```
+
+**5 条虚线回指**是这张图最有价值的发现：`VirtualEngine` 调它们，它们又反过来调 `VirtualEngine`——**双向耦合**。这是当前架构最大的耦合风险点。
+
+## 图 2：核心 vs 边缘（`docs/diagrams/core-vs-edges.dot`）
+
+把 12 个类折叠成一个整体，四路看清关系：
+
+| 方向 | 关系 |
+|---|---|
+| **↑ 向上** | 5 个 UI 模块（`app` + 4 个 `feature`）全部"持有引擎"；它们只额外共享 `core:designsystem` |
+| **↓ 向下** | 四路下沉：`native-hook.cpp`（GOT/PLT）、`core:binder`（AMS/PMS 代理）、`core:services`（VPMS/VAMS）、`core:framework`（APK 解析） |
+| **→ 向外** | 拉起 Guest App（注入 ClassLoader）、hook Android Framework（AMS/PMS/WMS/WebView） |
+| **旁路** | 探针是独立 APK，跑在 guest 内，靠 Android API 观测核心行为 |
+
+## 数据来源与一个诚实的说明
+
+`tools/collect-graph-data.py` 统计的是：
+
+- **行数/函数数**：类定义起到文件末尾（真实）
+- **依赖**：A 的源码里出现 B 的类名次数（`\b` 词边界）
+
+**后者会把注释和字符串里的提及也算进去**，所以边上的数字应理解为**耦合强度**，不是编译期依赖。真正的模块级依赖看 `build.gradle.kts`（已记录在 `project-health-20261122.md`）。
+
+## 入库与 ignore
+
+| 入库 | 不入库 |
+|---|---|
+| `docs/diagrams/*.dot`（2 个） | `docs/diagrams/*.png` |
+| `docs/diagrams/README.md` | `*.svg` / `*.pdf` |
+| `tools/collect-graph-data.py` | |
+
+`.gitignore` 新增规则验证通过：
+
+```
+$ git check-ignore -v docs/diagrams/core-classes.png
+.gitignore:50:docs/diagrams/*.png	docs/diagrams/core-classes.png
+
+$ git check-ignore docs/diagrams/core-classes.dot
+（无输出 = 未被忽略 ✓）
+```
+
+`docs/diagrams/README.md` 里写了重新渲染命令：
+
+```powershell
+$dot = "C:\Program Files\Graphviz\bin\dot.exe"
+cd docs\diagrams
+& $dot -Tpng core-classes.dot -o core-classes.png
+& $dot -Tsvg core-classes.dot -o core-classes.svg   # 矢量图更适合嵌文档
+```
+
+## 图上暴露的一个可选优化
+
+图 1 里 5 条虚线回指说明：可以把 `VirtualEngine` 的"被回调"部分抽成一个接口（如 `EngineHost`），让管理器依赖接口而不是 `VirtualEngine` 具体类，从而打破双向耦合。不过这属于重构，当前功能正常，建议只在做架构演进时考虑。
