@@ -32,7 +32,7 @@ cd docs\diagrams
 python tools\collect-graph-data.py     # 输出 _ref/ShitJumpingVM/_graph.json
 ```
 
-依赖关系来自「A 的源码里出现 B 的类名」的次数（`\b` 词边界匹配）。**这个统计会把注释和字符串里的提及也算进去**，所以页面上的数字应理解为「耦合强度」而非「编译期依赖」。真正的模块级依赖以 `build.gradle.kts` 的 `project(...)` 为准（见 `docs/records/project-health-20261122.md`）。
+依赖关系来自「A 的源码里出现 B 的类名」的次数（`\b` 词边界匹配）。**这个统计会把注释和字符串里的提及也算进去**，所以页面上的数字应理解为「耦合强度」而非「编译期依赖」。真正的模块级依赖以 `build.gradle.kts` 的 `project(...)` 为准（见 `docs/records/记录-工程体检.md`）。
 
 ## 两张图各自说明什么
 

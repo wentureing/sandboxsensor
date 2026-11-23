@@ -101,7 +101,7 @@ git remote set-url origin https://github.com/wentureing/sandboxsensor.git
 
 **一句话**：栈顶在驱动里，不代表病因在驱动里；breadcrumb 是正向记录过程，比从结果倒推可靠。
 
-详细用法见 `docs/debugging-guide.md`。
+详细用法见 `docs/调试指南.md`。
 
 ## 大量精确修改前必须落盘修改计划
 

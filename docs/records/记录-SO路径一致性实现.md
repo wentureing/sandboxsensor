@@ -2,7 +2,7 @@
 
 - 日期：2026-11-22
 - 目标：guest 看到的 SO 路径形如 `/data/user/0/<guest_pkg>/lib/arm64/libx.so`
-- 动机：`/proc/self/maps` 检测（见 `hook-granularity-runtime-20261122.md` §6.1）
+- 动机：`/proc/self/maps` 检测（见 `记录-native-hook作用域与污染.md` §6.1）
 
 ---
 

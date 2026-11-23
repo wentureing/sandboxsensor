@@ -2,7 +2,7 @@
 
 - 决策日期：2026-11-22
 - 决策来源：**用户明确接受「没有任何过渡效果和圆角」**，美观要求低，稳定性优先
-- 背景：Adreno 的 `libllvm-glnext` 在每个新的 Skia program 变体上可能 abort（见 `render-engine-investigation-20261122.md`）
+- 背景：Adreno 的 `libllvm-glnext` 在每个新的 Skia program 变体上可能 abort（见 `记录-native-hook作用域与污染.md`）
 
 ---
 
