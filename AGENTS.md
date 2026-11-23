@@ -175,6 +175,10 @@ node tools/gh-api.mjs "/repos/wentureing/sandboxsensor/actions/runs?per_page=3"
 
 ## 其他约定
 
+- **Kotlin KDoc 里禁止出现 /****：Kotlin 块注释**可嵌套**。KDoc 里写路径通配
+  <sandboxDataRoot>/<instanceId>/** 会打开一个新的嵌套注释，导致 CI 报
+  Unclosed comment（CI #25 已踩）。通配一律改写成中文描述「.../ 下的任意路径」。
+  提交前可扫一遍注释区的 /**。
 - **凭据**：`token.txt` 不入库、不读取内容到对话中；脚本内读取后立即用于请求
 - **产物命名**：`<类型>-<7位sha>[-<abi>].apk`
 - **容器 command 通道**：`adb shell am broadcast -n com.nextvm.app/.CmdReceiver -a com.nextvm.cmd.{INSTALL|LAUNCH|LAUNCH_ACTIVITY|UNINSTALL|LIST|COLLECT_OUT|LIST_OUT|CAT_OUT}`
