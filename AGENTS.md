@@ -103,6 +103,59 @@ git remote set-url origin https://github.com/wentureing/sandboxsensor.git
 
 详细用法见 `docs/debugging-guide.md`。
 
+## 大量精确修改前必须落盘修改计划
+
+> **触发条件（满足任一即算"大量"）**：改动涉及 ≥3 个文件 / ≥50 行 /
+> ≥2 个 Gradle 模块 / 删除或重命名文件 / 触碰 hook、路径重定向、权限判断。
+
+**这类改动一律走两步，不许直接开改：**
+
+### 第 1 步：落盘修改计划（改之前）
+
+文件：`docs/changes/<YYYYMMDD>-<任务名>.md`
+
+必须包含：
+
+| 章节 | 内容 |
+| --- | --- |
+| **目标** | 一句话 |
+| **影响范围** | 文件清单 + 每个文件的改动类型（新增/修改/删除） |
+| **逐文件 diff 预览** | 改前/改后片段；**跨文件或有歧义时用 `diff -u` 格式** |
+| **风险** | 回归点、可能破坏的既有行为 |
+| **回退方案** | 具体到命令（`git revert <sha>` / 恢复某个文件） |
+| **验证方法** | 可执行命令 + 判据 |
+
+**生成方式（命令行，不手写猜测）**：
+
+```powershell
+# 方案 A：先改到工作区，用 git 生成真实 diff，再决定是否提交
+git -C _ref/ShitJumpingVM diff > docs/changes/<date>-<task>.diff
+git -C _ref/ShitJumpingVM diff --stat
+
+# 方案 B：不确定时，先把"打算改什么"写成 patch 文本，用 --dry-run 校验
+git -C _ref/ShitJumpingVM apply --check my.patch
+```
+
+**落盘后停下来等确认**：`docs/changes/<...>.md` 写完即报告"计划已就绪，请查看"，
+**不要在同一条回复里继续改代码**（除非明确说"直接改"）。
+
+### 第 2 步：改完后追加实际 diff（改之后）
+
+在同一文件的 `## 实际变更` 章节追加：
+
+```powershell
+git -C _ref/ShitJumpingVM diff > docs/changes/<date>-<task>.actual.diff
+git -C _ref/ShitJumpingVM diff --stat >> docs/changes/<date>-<task>.actual.diff
+```
+
+**`.actual.diff` 与计划中的"预期"不一致时，必须在文档里解释差异原因**。
+
+### 为什么定这条约束
+
+历史上已经发生过几次"边想边改、越改越偏"：
+`DiagnosticsSink` 半成品、WebView hook 先加后回退、`CACHE_EPOCH` 基于错误诊断清理缓存。
+**落盘 + 等确认** 是最便宜的纠错点。
+
 ## 其他约定
 
 - **凭据**：`token.txt` 不入库、不读取内容到对话中；脚本内读取后立即用于请求
