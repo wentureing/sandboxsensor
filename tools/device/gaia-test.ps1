@@ -121,6 +121,57 @@ function Tap([int]$X, [int]$Y) {
     Adb @('shell', "input tap $X $Y") | Out-Null
 }
 
+<#
+  只找「按钮」而不是任意文本节点，且多个候选时取**最下方**的那个。
+
+  为什么需要它（2026-11-23 实测两台设备）：
+    Gaia 的权限页标题里含「授予」字样：
+      "为使该应用程序能够正常运行，需要如下这些权限, 若不授予…可能导致…"
+    而按钮文案是「确定」，位置在页面底部：
+      vivo A15  (540, 2005)
+      OPPO A12  (540, 2064)
+    用普通文本匹配会先命中标题（因为「授予」在候选列表里），点到标题无效。
+#>
+function WaitForBottomButton([string[]]$Candidates, [int]$TimeoutSec, [string]$Tag) {
+    $deadline = (Get-Date).AddSeconds($TimeoutSec)
+    $last = $null
+    while ((Get-Date) -lt $deadline) {
+        $ui = DumpUi $Tag
+        if ($ui) {
+            $hits = @()
+            foreach ($n in $ui.SelectNodes('//node')) {
+                $t = $n.GetAttribute('text')
+                if (-not $t) { continue }
+                foreach ($c in $Candidates) {
+                    if ($t -eq $c) {                       # 精确等于，不做包含匹配
+                        $b = $n.GetAttribute('bounds')
+                        if ($b -match '\[(\d+),(\d+)\]\[(\d+),(\d+)\]') {
+                            $x1 = [int]$matches[1]; $y1 = [int]$matches[2]
+                            $x2 = [int]$matches[3]; $y2 = [int]$matches[4]
+                            $hits += @{
+                                Label  = $t
+                                X      = [int](($x1 + $x2) / 2)
+                                Y      = [int](($y1 + $y2) / 2)
+                                Bottom = $y2
+                            }
+                        }
+                    }
+                }
+            }
+            if ($hits.Count -gt 0) {
+                $best = $hits | Sort-Object Bottom -Descending | Select-Object -First 1
+                Write-Host "    ✓ 按钮 '$($best.Label)' @ ($($best.X),$($best.Y))  (共 $($hits.Count) 个候选)"
+                return $best
+            }
+            $last = $ui
+        }
+        Start-Sleep -Milliseconds 600
+    }
+    Write-Host "    ✗ 超时未找到按钮：$($Candidates -join ' / ')" -ForegroundColor Red
+    ShowUiLabels $last
+    return $null
+}
+
 # ---------------------------------------------------------------- main
 
 Write-Host "=== Gaia 自动化测试 ===" -ForegroundColor Cyan
@@ -153,19 +204,28 @@ if (-not $SkipLaunch) {
     Tap $icon.X $icon.Y
     Start-Sleep -Seconds 2
 
-    # 3) 权限窗口点「授予」
-    #    Gaia 首次启动 guest 会弹权限页；不同版本文案可能是 授予/允许/确定/同意
-    Write-Host '[3/5] 等待权限窗口并点「授予」' -ForegroundColor Cyan
-    $grant = WaitForAny @('授予', '允许', '同意', '确定', '始终允许') 10 'grant'
+    # 3) 权限窗口点「确定」
+    #
+    # ⚠️ 实测（2026-11-23，两台设备）：
+    #   vivo A15   按钮「确定」@ (540, 2005)
+    #   OPPO A12   按钮「确定」@ (540, 2064)
+    #   而权限页的**标题**里也含「授予」字样（"若不授予…可能导致应用程序不能正常运行"）
+    #   -> 按文本匹配会先命中标题，点到标题无效（本轮踩过两次）
+    #
+    # 策略：
+    #   1) 只在真正的**按钮文案**里找（不用"授予"，那是标题用词）
+    #   2) 多个候选时取 **bounds 最下方** 的那个（按钮总在页面底部）
+    Write-Host '[3/5] 等待权限窗口并点「确定」' -ForegroundColor Cyan
+    $grant = WaitForBottomButton @('确定', '允许', '同意', '继续', '始终允许') 12 'grant'
     if ($grant) {
+        Write-Host "    点击 [$($grant.Label)] @ ($($grant.X),$($grant.Y))"
         Tap $grant.X $grant.Y
-        Start-Sleep -Seconds 2
-        # 有些版本点完「授予」还会再弹一次确认
-        $again = WaitForAny @('授予', '允许', '确定', '继续') 5 'grant2'
+        Start-Sleep -Seconds 3          # ← 用户要求：点完等 3 秒再继续
+        $again = WaitForBottomButton @('确定', '允许', '继续') 5 'grant2'
         if ($again) {
             Write-Host '    (第二次确认)' -ForegroundColor DarkYellow
             Tap $again.X $again.Y
-            Start-Sleep -Seconds 2
+            Start-Sleep -Seconds 3
         }
     } else {
         Write-Host '    (没有权限窗口，可能已授权过，继续)' -ForegroundColor DarkYellow
