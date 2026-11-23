@@ -25,7 +25,7 @@ permissions:
 
 # 触发说明：本 workflow 只在自身文件变化或手动 dispatch 时运行。
 # 改完 ShitJumpingVM 后，在此做一个无副作用改动即可触发重建。
-# patch-level: p21（P1-2: Robolectric 冒烟测试）
+# patch-level: p22（P1-2: HostReadPolicy + 17 条单测）
 
 concurrency:
   group: container-${{ github.ref }}

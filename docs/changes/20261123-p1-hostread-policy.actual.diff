@@ -1,0 +1,306 @@
+diff --git a/core/sandbox/src/main/java/com/nextvm/core/sandbox/HostReadPolicy.kt b/core/sandbox/src/main/java/com/nextvm/core/sandbox/HostReadPolicy.kt
+new file mode 100644
+index 0000000..0acd62c
+--- /dev/null
++++ b/core/sandbox/src/main/java/com/nextvm/core/sandbox/HostReadPolicy.kt
+@@ -0,0 +1,96 @@
++package com.nextvm.core.sandbox
++
++import java.io.File
++
++/**
++ * 宿主代读的路径白名单（sandboxsensor P1-2）。
++ *
++ * 用途：WebView 的渲染跑在 isolated 进程里，读不到容器沙箱；宿主有权限，
++ * 可以代它打开文件、通过 stream 交给 WebView。但**宿主代读意味着替 guest
++ * 打开了它本不该打开的文件**，所以必须有严格的白名单，否则等于给 guest 开后门。
++ *
++ * 允许范围（默认拒绝）：
++ *   1) guest 自己的沙箱      <sandboxDataRoot>/<instanceId>/**
++ *   2) 容器自己的外部目录    <externalRoot>/Android/data/com.nextvm.app/**
++ *   3) 导入目录              <externalRoot>/Download/**     （与 p18 导入豁免同一语义）
++ *
++ * 拒绝：其他 guest 的沙箱、其他应用、/system、/vendor、/apex、其余公共目录。
++ *
++ * 四条硬约束（缺一条就是安全洞）：
++ *   ① canonicalPath 规范化 —— 防 `../` 逃逸、解析软链
++ *   ② 前缀后必须加 File.separator —— 防 `/x/data/abc` 命中 `/x/data/abcd`
++ *   ③ 按 instanceId 隔离 —— A guest 不能读 B guest 的沙箱
++ *   ④ 软链由 ① 解析后自然被 ②③ 的绝对前缀拦住
++ */
++object HostReadPolicy {
++
++    /** 默认外部存储根。测试可注入其他值。 */
++    const val DEFAULT_EXTERNAL_ROOT = "/storage/emulated/0"
++
++    /** 超过这个长度一律拒绝（防 DoS 与异常路径）。 */
++    private const val MAX_PATH_LENGTH = 4096
++
++    /** 容器被授权读取的外部区域（相对 externalRoot）。 */
++    private val HOST_ALLOWED_RELATIVE = listOf(
++        "Android/data/com.nextvm.app",
++        "Download",
++    )
++
++    /**
++     * 判断 [requested] 是否允许宿主代读。
++     *
++     * @param sandboxDataRoot 真实沙箱数据根（`files/virtual/data`）
++     * @param instanceId      发起请求的 guest 实例
++     * @param requested       guest 请求的路径（可能是虚拟路径 / 相对路径 / 软链）
++     * @param externalRoot    外部存储根，默认 [DEFAULT_EXTERNAL_ROOT]
++     * @return 规范化后的真实路径；不允许则 `null`
++     */
++    fun resolve(
++        sandboxDataRoot: File,
++        instanceId: String,
++        requested: String,
++        externalRoot: String = DEFAULT_EXTERNAL_ROOT,
++    ): String? {
++        // 0) 输入基本校验
++        if (requested.isBlank()) return null
++        if (requested.length > MAX_PATH_LENGTH) return null
++        if (requested.indexOf('\u0000') >= 0) return null
++
++        // ① canonicalPath 规范化：解析 `..` 与软链
++        val real = runCatching { File(requested).canonicalPath }.getOrNull() ?: return null
++
++        // ② 自己沙箱：前缀后必须加分隔符，防前缀攻击
++        if (isSafeInstanceId(instanceId)) {
++            val own = runCatching {
++                File(sandboxDataRoot, instanceId).canonicalPath + File.separator
++            }.getOrNull()
++            if (own != null && real.startsWith(own)) return real
++        }
++
++        // ③ 容器外部区域
++        for (rel in HOST_ALLOWED_RELATIVE) {
++            val allowed = File(externalRoot, rel)
++            val prefix = runCatching { allowed.canonicalPath + File.separator }.getOrNull()
++                ?: continue
++            if (real.startsWith(prefix)) return real
++        }
++
++        // ④ 其他一律拒绝
++        return null
++    }
++
++    /**
++     * instanceId 是否安全（可拼进路径）。
++     *
++     * 只允许 `[A-Za-z0-9._-]`，长度 <= 128，且不含 `..`。
++     */
++    fun isSafeInstanceId(id: String): Boolean {
++        if (id.isEmpty() || id.length > 128) return false
++        if (id.contains("..")) return false
++        for (c in id) {
++            val ok = c.isLetterOrDigit() || c == '.' || c == '_' || c == '-'
++            if (!ok) return false
++        }
++        return true
++    }
++}
+diff --git a/core/sandbox/src/test/java/com/nextvm/core/sandbox/HostReadPolicyTest.kt b/core/sandbox/src/test/java/com/nextvm/core/sandbox/HostReadPolicyTest.kt
+new file mode 100644
+index 0000000..96e7711
+--- /dev/null
++++ b/core/sandbox/src/test/java/com/nextvm/core/sandbox/HostReadPolicyTest.kt
+@@ -0,0 +1,195 @@
++package com.nextvm.core.sandbox
++
++import org.junit.Assert.assertEquals
++import org.junit.Assert.assertFalse
++import org.junit.Assert.assertNotNull
++import org.junit.Assert.assertNull
++import org.junit.Assert.assertTrue
++import org.junit.Assume.assumeTrue
++import org.junit.Before
++import org.junit.Rule
++import org.junit.Test
++import org.junit.rules.TemporaryFolder
++import org.junit.runner.RunWith
++import org.robolectric.RobolectricTestRunner
++import org.robolectric.annotation.Config
++import java.io.File
++import java.nio.file.Files
++
++/**
++ * HostReadPolicy 的 15 条用例（sandboxsensor P1-2）。
++ *
++ * 覆盖：正常路径、`..` 逃逸、前缀攻击、跨实例、其他应用、系统目录、
++ *      容器外部、导入目录、非白名单公共目录、空输入、深逃逸、软链、
++ *      尾斜杠、NUL 注入、超长路径。
++ */
++@RunWith(RobolectricTestRunner::class)
++@Config(sdk = [35])
++class HostReadPolicyTest {
++
++    @get:Rule
++    val tmp = TemporaryFolder()
++
++    private lateinit var dataRoot: File
++    private lateinit var extRoot: File
++    private val instanceId = "com.example_1700000000000"
++    private val otherId = "com.other_1700000000001"
++
++    @Before
++    fun setUp() {
++        dataRoot = File(tmp.newFolder("files", "virtual"), "data").apply { mkdirs() }
++        File(dataRoot, instanceId).mkdirs()
++        File(dataRoot, otherId).mkdirs()
++
++        extRoot = tmp.newFolder("emulated0")
++        File(extRoot, "Android/data/com.nextvm.app/files").mkdirs()
++        File(extRoot, "Download").mkdirs()
++        File(extRoot, "DCIM").mkdirs()
++    }
++
++    private fun resolve(path: String): String? =
++        HostReadPolicy.resolve(dataRoot, instanceId, path, extRoot.absolutePath)
++
++    private fun touch(relative: String): File {
++        val f = File(dataRoot, relative)
++        f.parentFile?.mkdirs()
++        f.writeText("x")
++        return f
++    }
++
++    // 1) 正常路径
++    @Test
++    fun ownSandboxFileIsAllowed() {
++        val f = touch("$instanceId/files/a.html")
++        assertNotNull(resolve(f.absolutePath))
++    }
++
++    // 2) `..` 逃逸到另一个实例
++    @Test
++    fun dotDotEscapeToOtherInstanceIsRejected() {
++        val f = touch("$otherId/files/a.html")
++        val escaping = File(dataRoot, "$instanceId/../$otherId/files/a.html").absolutePath
++        assertNull(resolve(escaping))
++        assertNull("对照：直接用真实路径也应被拒（跨实例）", resolve(f.absolutePath))
++    }
++
++    // 3) 前缀攻击：<id>abc 不该命中 <id>
++    @Test
++    fun prefixAttackIsRejected() {
++        val sibling = touch("${instanceId}abc/files/a.html")
++        assertNull(resolve(sibling.absolutePath))
++    }
++
++    // 4) 跨实例：直接访问另一个实例的沙箱
++    @Test
++    fun crossInstanceIsRejected() {
++        val f = touch("$otherId/files/a.html")
++        assertNull(resolve(f.absolutePath))
++    }
++
++    // 5) 其他应用
++    @Test
++    fun otherAppPrivateDirIsRejected() {
++        assertNull(resolve("/data/data/com.other.app/files/x"))
++        assertNull(resolve("/data/user/0/com.other.app/files/x"))
++    }
++
++    // 6) 系统目录
++    @Test
++    fun systemDirsAreRejected() {
++        assertNull(resolve("/system/etc/hosts"))
++        assertNull(resolve("/vendor/lib64/libc.so"))
++        assertNull(resolve("/apex/com.android.runtime/lib64/libc.so"))
++    }
++
++    // 7) 容器外部私有目录
++    @Test
++    fun containerExternalDirIsAllowed() {
++        val f = File(extRoot, "Android/data/com.nextvm.app/files/x.html").apply { writeText("x") }
++        assertNotNull(resolve(f.absolutePath))
++    }
++
++    // 8) 导入目录
++    @Test
++    fun downloadDirIsAllowed() {
++        val f = File(extRoot, "Download/x.html").apply { writeText("x") }
++        assertNotNull(resolve(f.absolutePath))
++    }
++
++    // 9) 非白名单公共目录
++    @Test
++    fun otherPublicDirsAreRejected() {
++        val f = File(extRoot, "DCIM/x.jpg").apply { writeText("x") }
++        assertNull(resolve(f.absolutePath))
++    }
++
++    // 10) 空输入
++    @Test
++    fun blankInputIsRejected() {
++        assertNull(resolve(""))
++        assertNull(resolve("   "))
++    }
++
++    // 11) 深逃逸
++    @Test
++    fun deepEscapeIsRejected() {
++        val p = File(dataRoot, "$instanceId/files/../../../etc/passwd").absolutePath
++        assertNull(resolve(p))
++    }
++
++    // 12) 软链指向白名单外
++    @Test
++    fun symlinkOutsideWhitelistIsRejected() {
++        val outside = tmp.newFolder("outside")
++        val target = File(outside, "secret.txt").apply { writeText("s") }
++        val link = File(dataRoot, "$instanceId/files/link.txt")
++        link.parentFile?.mkdirs()
++        val created = runCatching {
++            Files.createSymbolicLink(link.toPath(), target.toPath())
++        }.isSuccess
++        assumeTrue("当前文件系统不支持软链，跳过", created)
++        assertNull(resolve(link.absolutePath))
++    }
++
++    // 13) 尾斜杠
++    @Test
++    fun trailingSlashIsAllowed() {
++        File(dataRoot, "$instanceId/files").mkdirs()
++        assertNotNull(resolve(File(dataRoot, "$instanceId/files").absolutePath + File.separator))
++    }
++
++    // 14) NUL 注入
++    @Test
++    fun nulByteIsRejected() {
++        assertNull(resolve("/data/user/0/x\u0000.html"))
++    }
++
++    // 15) 超长路径
++    @Test
++    fun overlongPathIsRejected() {
++        val long = "/" + "a".repeat(5000)
++        assertNull(resolve(long))
++    }
++
++    // 附带：instanceId 合法性与空/非法值
++    @Test
++    fun unsafeInstanceIdDisablesOwnSandboxBranch() {
++        assertTrue(HostReadPolicy.isSafeInstanceId(instanceId))
++        assertFalse(HostReadPolicy.isSafeInstanceId("../etc"))
++        assertFalse(HostReadPolicy.isSafeInstanceId("a/b"))
++        assertFalse(HostReadPolicy.isSafeInstanceId(""))
++        val f = touch("$instanceId/files/a.html")
++        assertNull(
++            "非法 instanceId 时不应放行任何沙箱路径",
++            HostReadPolicy.resolve(dataRoot, "../etc", f.absolutePath, extRoot.absolutePath)
++        )
++    }
++
++    // 附带：返回值是规范化后的路径
++    @Test
++    fun resolvedPathIsCanonical() {
++        val f = touch("$instanceId/files/a.html")
++        val r = resolve(File(dataRoot, "$instanceId/files/../files/a.html").absolutePath)
++        assertEquals(f.canonicalPath, r)
++    }
++}
+ .../java/com/nextvm/core/sandbox/HostReadPolicy.kt |  96 ++++++++++
+ .../com/nextvm/core/sandbox/HostReadPolicyTest.kt  | 195 +++++++++++++++++++++
+ 2 files changed, 291 insertions(+)
