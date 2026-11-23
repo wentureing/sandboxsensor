@@ -199,7 +199,15 @@ node tools/gh-api.mjs "/repos/wentureing/sandboxsensor/actions/runs?per_page=3"
 - **容器 command 通道**：`adb shell am broadcast -n com.nextvm.app/.CmdReceiver -a com.nextvm.cmd.{INSTALL|LAUNCH|LAUNCH_ACTIVITY|UNINSTALL|LIST|COLLECT_OUT|LIST_OUT|CAT_OUT}`
   - `LAUNCH_ACTIVITY --es pkg <pkg> --es activity <完整类名>`：容器启动 guest 时**只解析 LAUNCHER**，要起非 LAUNCHER 页面必须用这条
   - 结果统一打到 `logcat -d -s CmdReceiver`
-  - **导入豁免**（p18）：`/sdcard/Download/`、`/storage/emulated/0/Download/`、`/data/local/tmp/` 可直接 `INSTALL --es path`，不必再 push + run-as 复制
+  - **导入通道（实测修正 2026-11-23）：只用 `/data/local/tmp`**
+    - `/sdcard/Download/` 的 p18 豁免**从根上无效**：该目录下 adb push 的文件属主是
+      `u0_a0 media_rw`、权限 `660`，容器 uid 既不是 owner 也不是该组 →
+      **DAC 层就拒**，根本走不到路径重定向那一层（实测 `run-as ... cat` 报 Permission denied）
+    - `MANAGE_EXTERNAL_STORAGE` 当前是 `default`（未授权），且它通过 MediaProvider 生效，
+      **不绕过直接 `open()` 的 DAC 检查**
+    - `/data/local/tmp` 是 `644`，任何应用可读 → **唯一可靠通道**
+    - 详见 `docs/records/记录-导入通道真实约束.md`
+    - 正确用法：`adb push x.apk /data/local/tmp/` 然后 `INSTALL --es path /data/local/tmp/x.apk`
   - 其他路径仍需放到 app 私有目录（容器自身把 `/sdcard` 重定向到沙箱）
 - **测试设备**：`10AFA8169Z0039G`（vivo V2463A / Android 15 / arm64-v8a / PAGESIZE=4096）
 - **设备时钟**比电脑快约 2 分钟，日志按设备时间切片
