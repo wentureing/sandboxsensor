@@ -26,7 +26,7 @@ permissions:
 
 # 触发说明：本 workflow 只在自身文件变化或手动 dispatch 时运行。
 # 改完 ShitJumpingVM 后，在此做一个无副作用改动即可触发重建。
-# patch-level: p25（CI: 测试失败变红 + 页面内测试报告）
+# patch-level: p26（CI: 换 mikepenz 测试报告，不依赖 git）
 
 concurrency:
   group: container-${{ github.ref }}
@@ -138,16 +138,25 @@ jobs:
           tail -n 15 /tmp/unit.log
           exit $rc
 
-      # 测试报告：把 JUnit XML 转成 GitHub check run，失败时在 commit 页面标红并列出用例
+      # 测试报告：JUnit XML -> GitHub check run + job summary，直接在 Actions 页面看，
+      # 不需要下载 artifact。
+      #
+      # 用 mikepenz/action-junit-report 而不是 dorny/test-reporter：
+      # 后者需要在一个 git 仓库根目录运行（它执行 `git ls-files`），
+      # 而本 workflow 用 `actions/checkout` 的 `path: container` 把仓库检到子目录，
+      # 根目录没有 .git -> p25 报 "fatal: not a git repository"。
+      # 本 action 纯解析 XML，不依赖 git。
       - name: Publish test report
         if: always()
-        uses: dorny/test-reporter@v1
+        uses: mikepenz/action-junit-report@v6
         with:
-          name: Unit test results
-          path: container/core/sandbox/build/test-results/testDebugUnitTest/*.xml
-          reporter: java-junit
-          fail-on-error: true
-          fail-on-empty: false
+          report_paths: 'container/core/sandbox/build/test-results/testDebugUnitTest/*.xml'
+          check_name: Unit Test Results
+          fail_on_failure: true        # 有失败 -> check 标红且步骤失败
+          require_tests: false         # 没跑测试不算失败
+          detailed_summary: true       # 在 job summary 里列出每个用例
+          job_summary: true
+          include_passed: true
 
       - name: Collect outputs
         if: always()
