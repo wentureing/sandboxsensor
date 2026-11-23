@@ -26,7 +26,7 @@ permissions:
 
 # 触发说明：本 workflow 只在自身文件变化或手动 dispatch 时运行。
 # 改完 ShitJumpingVM 后，在此做一个无副作用改动即可触发重建。
-# patch-level: p27（CAT_OUT 分块 2KB）
+# patch-level: p28（导入豁免补全 + 固定 keystore + 版本号动态）
 
 concurrency:
   group: container-${{ github.ref }}
@@ -111,6 +111,14 @@ jobs:
             ~/.gradle/caches
             ~/.gradle/wrapper/dists
           key: gradle-home-8.9-v2
+
+      # 固定 debug keystore：否则每次构建都重新生成签名，
+      # adb install -r 会报 INSTALL_FAILED_UPDATE_INCOMPATIBLE（必须卸载重装，沙箱数据全丢）。
+      - name: Cache debug keystore
+        uses: actions/cache@v4
+        with:
+          path: ~/.android/debug.keystore
+          key: android-debug-keystore-v1
 
       - name: Build container APK
         working-directory: container
