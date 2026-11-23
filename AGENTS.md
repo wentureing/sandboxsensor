@@ -156,6 +156,23 @@ git -C _ref/ShitJumpingVM diff --stat >> docs/changes/<date>-<task>.actual.diff
 `DiagnosticsSink` 半成品、WebView hook 先加后回退、`CACHE_EPOCH` 基于错误诊断清理缓存。
 **落盘 + 等确认** 是最便宜的纠错点。
 
+## CI 触发后不要阻塞等待
+
+**触发构建后直接继续下一步工作，不要轮询/sleep 等结果。**
+
+需要结果时再单独查一次：
+
+`powershell
+node tools/gh-api.mjs "/repos/wentureing/sandboxsensor/actions/runs?per_page=3"
+# 看 status / conclusion / head_sha
+`
+
+**理由**：容器构建 3-5 分钟、探针 2-3 分钟，阻塞等待会白占一整轮对话。
+正确节奏是「改代码 -> 触发 CI -> 同一轮内做下一个任务的计划/编码 -> 稍后再查一次」。
+
+例外：只有下一步动作**必须以构建产物为前提**（例如要装包验证）时，才单独查一次；
+若仍 in_progress 就留到下一轮再查，不要死等。
+
 ## 其他约定
 
 - **凭据**：`token.txt` 不入库、不读取内容到对话中；脚本内读取后立即用于请求
