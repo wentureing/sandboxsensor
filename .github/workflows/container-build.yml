@@ -26,7 +26,7 @@ permissions:
 
 # 触发说明：本 workflow 只在自身文件变化或手动 dispatch 时运行。
 # 改完 ShitJumpingVM 后，在此做一个无副作用改动即可触发重建。
-# patch-level: p28（导入豁免补全 + 固定 keystore + 版本号动态）
+# patch-level: p29（修豁免越权：access W_OK / fopen r+）
 
 concurrency:
   group: container-${{ github.ref }}
