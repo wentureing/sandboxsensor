@@ -37,23 +37,15 @@
           UiTestActivity（v1.5+）：纯 UI 排查页。
           只显示可长按选中的文本，不跑任何虚拟环境检查，也不自动 finish。
 
-          重要：它承担 **LAUNCHER 入口**。
-          原因：容器（NEXTVM）在启动 guest 时只解析 LAUNCHER 组件，
-          `am start -n <pkg>/.SomeActivity` 会被劫持成 LAUNCHER 那个 Activity
-          （实测：指定 UiTestActivity，实际 Displayed 的是 ProbeActivity）。
-          所以把 LAUNCHER 放在这里，才能从容器卡片/am start 直达本页。
-          探针本体仍由 ProbeProvider 自动触发，不依赖 Activity 入口。
+          v1.13 起**不再承担 LAUNCHER 入口**（入口给 WebViewProbeActivity）。
+          原因：Gaia 这类容器里没有命令行，只能靠「点桌面图标」启动，
+          所以入口必须直达要跑的那个页面。UiTestActivity 仍保留为可 am start 的调试页。
         -->
         <activity
             android:name=".UiTestActivity"
             android:exported="true"
             android:icon="@android:drawable/sym_def_app_icon"
-            android:theme="@android:style/Theme.Material.Light.NoActionBar">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-        </activity>
+            android:theme="@android:style/Theme.Material.Light.NoActionBar" />
 
         <!--
           WebViewProbeActivity（v1.9+）：用实践证明 WebView 在容器里的行为。
@@ -66,10 +58,20 @@
           W5  ApplicationInfo.getAllApkPaths()  AOSP WebViewFactory 用它加 shared library
           W6  宿主 getAssets() 里有没有 WebView 资源  验证 addAssetPathAsSharedLibrary 是否生效
           W7  0x02 域资源能否解析         直接验 popup 崩溃那个 0x20c0006
+          W14 非沙箱路径（adb push 的文件）   对照：证明根因在「沙箱路径」
+          W15 沙箱路径 + query             测是否按 URL 末段判扩展名
+          W16 沙箱 .txt                    测「只看扩展名」
+          W17 沙箱路径 + adb 放的文件       排除「谁写的文件」这个变量
+          W18 容器私有目录根                排除 virtual/data 路径段
+          W19 被容器重定向的 /sdcard        测重定向路径的 MIME
+          W20 内容以 GIF89a 开头            ⭐ 判定 MIME 是否走「内容嗅探」
+          W30 反射包装 WebViewClient        预演容器的修复方案（补 MIME）
 
-          不设 LAUNCHER（避免抢 UiTestActivity 的入口），用 CmdReceiver 的
-          LAUNCH_ACTIVITY 命令（带 es activity 参数）启动。
-          同样用 NoActionBar 主题，避免容器里 setDefaultIcon 去 guest Resources 查 0x7f 图标。
+          v1.13 起它承担 **LAUNCHER 入口**：在 Gaia 这类没有命令行的容器里，
+          点桌面图标 = 打开本页 = 自动跑完所有 W 实验，结果直接显示在屏幕上
+          （结果同时在 wvprobe-result.txt 与 `logcat -s WVP`）。
+
+          主题用 NoActionBar，避免容器里 setDefaultIcon 去 guest Resources 查 0x7f 图标。
 
           注意：XML 注释里不能出现双连字符（XML 规范），所以上面用中文描述代替了
           命令行参数写法，也不要写三个点之类的路径通配。
@@ -78,7 +80,12 @@
             android:name=".WebViewProbeActivity"
             android:exported="true"
             android:icon="@android:drawable/sym_def_app_icon"
-            android:theme="@android:style/Theme.Material.NoActionBar" />
+            android:theme="@android:style/Theme.Material.NoActionBar">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
     </application>
 
 </manifest>

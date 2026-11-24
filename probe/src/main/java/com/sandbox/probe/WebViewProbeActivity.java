@@ -56,6 +56,12 @@ import java.util.concurrent.atomic.AtomicReference;
  *     ② 包装后内层（应用的）client 还会不会被调用
  *     ③ 包装补 MIME 后沙箱路径的 HTML 能否正常渲染
  *
+ * v1.13 另两处改动（Gaia 场景 —— Gaia 里没有命令行，只能点图标）：
+ *   ① 本 Activity 承担 LAUNCHER：点桌面图标 = 打开本页 = 自动跑完全部实验
+ *   ② 结果实时显示在屏幕上（等宽字体、可长按选中复制），并同时写 3 个候选路径的文件：
+ *        filesDir / externalRoot(/sdcard) / externalFiles
+ *      每个路径的 OK / FAIL（含异常名）都会打出来 —— 这本身就是权限传导的证据
+ *
  * 实验矩阵（v1.10）：
  *   W8   webView.getContext() 是谁（packageName / class / identityHash）
  *   W12  webView.getContext().getAssets() 是否等于 this.getAssets()
@@ -88,11 +94,13 @@ public class WebViewProbeActivity extends Activity {
             "<html><body><h1 id='h'>WVPAGE_OK</h1><p>hello from probe</p></body></html>";
 
     private final List<String> lines = new ArrayList<>();
-    private FileOutputStream out;
     private final Handler main = new Handler(Looper.getMainLooper());
 
     private WebView wv;
     private TextView status;
+    /** v1.13：屏幕上实时显示的结果区（Gaia 这类容器里没有 adb，屏幕是唯一取结果方式） */
+    private TextView logView;
+    private android.widget.ScrollView logScroll;
     private int w11InterceptCount = 0;
 
     @Override
@@ -101,10 +109,25 @@ public class WebViewProbeActivity extends Activity {
 
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
+
         status = new TextView(this);
-        status.setText("WebViewProbe v1.13 running...");
+        status.setTextSize(13);
+        status.setPadding(12, 12, 12, 6);
+        status.setText("WebViewProbe v1.13 —— 打开即自动跑全部 W 实验，结果实时显示在下方");
         root.addView(status, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        // 结果区：等宽字体 + 可长按选中复制（找不到 adb 时可以直接复制出去）
+        logView = new TextView(this);
+        logView.setTextSize(8);
+        logView.setTypeface(android.graphics.Typeface.MONOSPACE);
+        logView.setTextIsSelectable(true);
+        logView.setPadding(8, 4, 8, 4);
+        logScroll = new android.widget.ScrollView(this);
+        logScroll.addView(logView);
+        root.addView(logScroll, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+
         setContentView(root);
 
         // 整个流程都在主线程（WebView 必须在有 Looper 的线程）
@@ -120,18 +143,101 @@ public class WebViewProbeActivity extends Activity {
 
     // ---------------------------------------------------------------- 记录
 
+    // v1.13：结果要落成文件。Gaia 这类容器没有 adb，所以对每个候选路径都试一遍，
+    // 并把「哪个成功 / 哪个失败（含 errno）」打到屏幕上 —— 这本身就是权限传导的证据。
+    private boolean outputsInitialized = false;
+    private boolean outInfoWritten = false;
+    private String outInfo = "";
+    private final List<FileOutputStream> outs = new ArrayList<>();
+
+    private void openOutputs() {
+        List<File> candidates = new ArrayList<>();
+        List<String> labels = new ArrayList<>();
+
+        // 1) 应用私有目录（容器里 run-as 可读；Gaia 落在 gaia 沙箱镜像里）
+        try {
+            candidates.add(new File(getFilesDir(), "wvprobe-result.txt"));
+            labels.add("filesDir");
+        } catch (Throwable ignore) {
+        }
+        // 2) 外部存储 /sdcard 根（guest 视角；Gaia 里会被重定向，且可能需要 MANAGE_EXTERNAL_STORAGE）
+        try {
+            File ext = android.os.Environment.getExternalStorageDirectory();
+            if (ext != null) {
+                candidates.add(new File(ext, "wvprobe-result.txt"));
+                labels.add("externalRoot");
+            }
+        } catch (Throwable ignore) {
+        }
+        // 3) 外部私有目录（应用专属，通常无需额外权限）
+        try {
+            File ef = getExternalFilesDir(null);
+            if (ef != null) {
+                candidates.add(new File(ef, "wvprobe-result.txt"));
+                labels.add("externalFiles");
+            }
+        } catch (Throwable ignore) {
+        }
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("OUT 输出目标（" + candidates.size() + " 个候选）\n");
+        for (int i = 0; i < candidates.size(); i++) {
+            File f = candidates.get(i);
+            String label = i < labels.size() ? labels.get(i) : "?";
+            try {
+                File dir = f.getParentFile();
+                if (dir != null && !dir.exists()) dir.mkdirs();
+                FileOutputStream o = new FileOutputStream(f, false);
+                outs.add(o);
+                sb.append("OUT  [").append(label).append("] ").append(f.getAbsolutePath()).append("  OK\n");
+            } catch (Throwable t) {
+                sb.append("OUT  [").append(label).append("] ").append(f.getAbsolutePath())
+                        .append("  FAIL ").append(t.getClass().getSimpleName())
+                        .append(": ").append(t.getMessage()).append('\n');
+            }
+        }
+        outInfo = sb.toString();
+        Log.i(TAG, outInfo.replace("\n", " | "));
+    }
+
     private synchronized void rec(String s) {
         lines.add(s);
         Log.i(TAG, s);
-        try {
-            if (out == null) {
-                File f = new File(getFilesDir(), "wvprobe-result.txt");
-                out = new FileOutputStream(f, false);
-                Log.i(TAG, "# WebViewProbe v1.13, filesDir=" + getFilesDir());
+        if (!outputsInitialized) {
+            outputsInitialized = true;
+            try {
+                openOutputs();
+            } catch (Throwable ignore) {
             }
-            out.write((s + "\n").getBytes("UTF-8"));
-            out.flush();
-        } catch (Throwable ignore) {
+        }
+        for (FileOutputStream o : outs) {
+            try {
+                o.write((s + "\n").getBytes("UTF-8"));
+                o.flush();
+            } catch (Throwable ignore) {
+            }
+        }
+        // v1.13：同时打到屏幕上（后到先排，保持与文件/logcat 相同顺序）
+        final String line = s;
+        main.post(() -> {
+            if (logView != null) logView.append(line + "\n");
+            if (logScroll != null) logScroll.post(() -> logScroll.fullScroll(android.view.View.FOCUS_DOWN));
+        });
+
+        // 输出目标这条信息放在第一行之后写（避免自己写自己时的顺序问题）
+        if (!outInfoWritten && !outInfo.isEmpty()) {
+            outInfoWritten = true;
+            final String info = outInfo;
+            for (FileOutputStream o : outs) {
+                try {
+                    o.write(info.getBytes("UTF-8"));
+                    o.flush();
+                } catch (Throwable ignore) {
+                }
+            }
+            main.post(() -> {
+                if (logView != null) logView.append(info);
+            });
         }
     }
 
@@ -154,8 +260,9 @@ public class WebViewProbeActivity extends Activity {
             } catch (Throwable t) {
                 rec("W0 settings FAIL: " + t);
             }
+            // v1.13：WebView 只留 200px —— 结果以日志区为主（W 系列的结论都从 innerText/contentType 取）
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, 500);
+                    ViewGroup.LayoutParams.MATCH_PARENT, 200);
             root.addView(wv, lp);
             wv.getSettings().setAllowFileAccess(true);
             wv.getSettings().setAllowContentAccess(true);
@@ -222,7 +329,7 @@ public class WebViewProbeActivity extends Activity {
                                         null, true, () -> {
                                             W11_MODE = false;
                                             rec("DONE all experiments (W11 intercepted " + w11InterceptCount + " request(s))");
-                                            status.setText("done, see logcat -s WVP");
+                                            status.setText("✅ 全部实验完成 —— 可长按下方文字复制");
                                         });
                             }))))))))));
     }
