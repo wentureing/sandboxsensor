@@ -222,6 +222,29 @@ core/hook/cpp/hooks_io.cpp                        →  docs/代码镜像/core/ho
 
 **自查**：一个文件里 KDoc 行数 > 代码行数的一半 → 说明该搬文档了。
 
+### 规则 9：拆一次 = 补一次测试 + 补一次文档
+
+> **每次拆分/新增文件，必须同时交付：样例测试 + 镜像文档。** 不允许"先拆，测试和文档以后补"。
+
+| 拆分动作 | 必须同时产出 |
+| --- | --- |
+| 从大文件迁出一个职责 | ① 该文件的 `*Test.kt`（能纯 JVM 测的部分；确实不可测的要在镜像文档「约束与坑」里写明原因） |
+| | ② `docs/代码镜像/<同路径>.md`（四节：职责/函数/偏差登记/约束与坑） |
+| 加一个开关/分支 | ①②  同上，且测试要覆盖**两个分支** |
+| 改可见性（`private`→`internal`） | ① `--deps` 检查结果记录进镜像文档的「约束与坑」 |
+
+**CI 按包粒度执行**（`module-test.yml` 的 `test_filter` 输入）：
+
+```powershell
+# 只跑 activitythread 包（刚拆完的模块）
+node tools/release/gh-api.mjs --dispatch module-test.yml main \
+  modules=":core:virtualization" \
+  test_filter="com.nextvm.core.virtualization.engine.activitythread.*"
+```
+
+**为什么按包**：整模块测试会连坐（一个包改坏、全模块红），按包跑能直接定位到刚拆的那部分，
+且更快（只编译一个模块 + 只跑匹配类）。
+
 ### 每类目录回答什么问题
 
 | 目录 | 回答 | 什么时候读 |
