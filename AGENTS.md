@@ -156,55 +156,53 @@ git -C _ref/ShitJumpingVM diff --stat >> docs/changes/<date>-<task>.actual.diff
 `DiagnosticsSink` 半成品、WebView hook 先加后回退、`CACHE_EPOCH` 基于错误诊断清理缓存。
 **落盘 + 等确认** 是最便宜的纠错点。
 
-## CI 触发：push 即触发两个，**绝不补 dispatch**
+## CI 触发：探针与容器**分开**，一次一个，分别命令
 
-**规则（2026-11-24 定，踩过坑）**：
+**规则（2026-11-24 定，我理解错过一次，这里是更正版）**：
 
-> **一次 `git push` 会自动触发 container + probe 两个 workflow，各一次。**
-> **push 之后不要再 `--dispatch`。** 补 dispatch 会产生同一 commit 的第二个 run，
-> 而两个 workflow 都配了 `concurrency: cancel-in-progress: true`，
-> 结果是**互相取消**，看起来像"CI 故障"。
+> **探针与容器是两个独立的 workflow，必须分开触发，各自一次。**
+> **不要指望一次 push 触发两个，也不要一次 dispatch 两个。**
+>
+> 用户的原话：「探针和容器要分开，不要一起 ci。一次一个，分别命令。」
 
-2026-11-24 的真实事故（`5c1ab5d`）：
+### 正确的触发方式
+
+| 场景 | 怎么做 |
+| --- | --- |
+| **改了探针**（`probe/**` 等） | push 主仓库 → `build-probe` 自动触发一次（`paths` 过滤保证只它跑） |
+| **改了容器源码**（`wentureing/ShitJumpingVM`） | 主仓库感知不到 → **手动 dispatch 一次**：`node tools/release/gh-api.mjs --dispatch container-build.yml main` |
+| **改了文档/工具** | 两个都不该跑（`paths` 会过滤掉） |
+
+**关键**：**一次只 dispatch 一个 workflow，且只调一次。**
+
+### 2026-11-24 犯的两个错
+
+**错误 1：我曾经 push 后又 dispatch**
 
 ```
-#29  build-probe      cancelled  push               ← push 自动触发
-#30  build-probe      cancelled  workflow_dispatch  ← 我又手动补了一次
-#31  build-probe      cancelled  workflow_dispatch  ← 又补一次
-#49  build-container  cancelled  workflow_dispatch
+#29  build-probe      cancelled  push               <- push 自动触发
+#30  build-probe      cancelled  workflow_dispatch  <- 我又补一次
+#31  build-probe      cancelled  workflow_dispatch  <- 又补一次
 ```
 
-同一个 commit 产生 probe ×3，全部被取消，**一个可用的产物都没有**。
+三个 run 撞在同一个 `concurrency` group（`cancel-in-progress: true`）→ **全部互相取消**，
+一个可用产物都没有。
 
-修复后（`6cf199e`，只 push）：
+**错误 2：我一度把 `paths` 过滤删掉，想"一次 push 触发两个"**
 
-```
-#32  build-probe      in_progress  push
-#50  build-container  in_progress  push
-```
+这是**理解错用户意图**。用户的「一次两个 CI」意思是「**两个都要跑，但要分开、各一次**」，
+不是「同一个提交同时触发两个」。已恢复 `paths`。
 
-**正好两个，各一个。**
+### 为什么容器必须手动 dispatch
 
-### 历史背景（为什么以前要手动 dispatch）
+容器源码在**独立仓库** `wentureing/ShitJumpingVM`，
+主仓库的 `container-build.yml` 是通过 `actions/checkout` 从那个仓库拉代码的，
+所以**主仓库 push 与容器代码变化无关**，无法自动感知。
 
-`container-build.yml` 原来的 `paths` 只有：
+### 排查 CI "看起来像故障" 的第一件事
 
-```yaml
-paths:
-  - '.github/workflows/container-build.yml'
-```
-
-改容器源码（在独立仓库 `wentureing/ShitJumpingVM`）、改探针、改文档**都不会触发**容器重建，
-所以历史上一直靠手动 `--dispatch`。`probe-build.yml` 的 `paths` 也只有 5 条。
-
-**2026-11-24 已去掉两个 workflow 的 `paths` 过滤** → push 任何文件都触发两个。
-
-### 什么时候才需要手动 dispatch
-
-只有当**容器仓库 push 了但主仓库没有新提交**时（容器代码在另一个 repo，
-主仓库感知不到），才需要一次 `--dispatch container-build.yml main`。
-
-**这种情况一次就够，不要重复调用。**
+看 `event` 字段：`push` 还是 `workflow_dispatch`。
+如果同一个 `head_sha` 出现多个 run，先怀疑**重复触发**，而不是 workflow 配置问题。
 
 ---
 
