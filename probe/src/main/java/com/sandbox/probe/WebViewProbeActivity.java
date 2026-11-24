@@ -113,7 +113,7 @@ public class WebViewProbeActivity extends Activity {
         status = new TextView(this);
         status.setTextSize(13);
         status.setPadding(12, 12, 12, 6);
-        status.setText("WebViewProbe v1.14 —— 打开即自动跑全部 W 实验，结果实时显示在下方");
+        status.setText("WebViewProbe v1.15 —— 打开即自动跑全部 W 实验，结果实时显示在下方");
         root.addView(status, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
@@ -278,6 +278,9 @@ public class WebViewProbeActivity extends Activity {
         probeAssetsIdentity();
         // v1.14: WebView **内部**看到的 application context（chromium ContextUtils）
         probeContextUtils();
+        // v1.15: 直接读「进程 Application」是谁 —— 这是 v138 要改的那个根因，
+        //        也是 W2/W3 变好或不变的「原因判据」（否则没生效和生效没修好看起来一样）
+        probeProcessApplication();
 
         // 3) 准备文件
         File f1 = prepareFile(HTML_NAME, HTML_BODY);
@@ -499,6 +502,73 @@ public class WebViewProbeActivity extends Activity {
             }
         } catch (Throwable t) {
             rec("W31 FAIL: " + t.getClass().getSimpleName() + ": " + t.getMessage());
+        }
+    }
+
+    /**
+     * W32：直接读「这个进程的 Application」是谁。
+     *
+     * 这是 WebView context 根因的**原因判据**：framework 里
+     * `WebViewFactory.getWebViewContextAndSetProvider()` -> `AppGlobals.getInitialApplication()`
+     * -> `ActivityThread.getApplication()` -> `mInitialApplication`，
+     * 而 `WebViewDelegate` 走 `ActivityThread.currentApplication()`，同一个字段。
+     *
+     * 只反射 framework 的公开类，不碰 WebView 的混淆类（W31 就栽在这上面）。
+     */
+    private void probeProcessApplication() {
+        try {
+            Class<?> at = Class.forName("android.app.ActivityThread");
+            try {
+                Object app = at.getMethod("currentApplication").invoke(null);
+                reportApp("W32 ActivityThread.currentApplication()", app);
+            } catch (Throwable t) {
+                rec("W32 currentApplication() FAIL: " + t.getClass().getSimpleName()
+                        + ": " + t.getMessage());
+            }
+            try {
+                Class<?> ag = Class.forName("android.app.AppGlobals");
+                Object app = ag.getMethod("getInitialApplication").invoke(null);
+                reportApp("W32 AppGlobals.getInitialApplication()", app);
+            } catch (Throwable t) {
+                rec("W32 getInitialApplication() FAIL: " + t.getClass().getSimpleName()
+                        + ": " + t.getMessage());
+            }
+            // mInitialApplication 字段原值（确认替换是否真的落到字段上）
+            try {
+                Object thread = at.getMethod("currentActivityThread").invoke(null);
+                java.lang.reflect.Field f = at.getDeclaredField("mInitialApplication");
+                f.setAccessible(true);
+                reportApp("W32 field mInitialApplication", f.get(thread));
+            } catch (Throwable t) {
+                rec("W32 mInitialApplication 读不到: " + t.getClass().getSimpleName());
+            }
+        } catch (Throwable t) {
+            rec("W32 FAIL: " + t.getClass().getSimpleName() + ": " + t.getMessage());
+        }
+        // W33：WebView 的数据目录后缀 —— 多实例是否共用 cookie/localStorage 目录
+        try {
+            Class<?> wf = Class.forName("android.webkit.WebViewFactory");
+            java.lang.reflect.Method m = wf.getDeclaredMethod("getDataDirectorySuffix");
+            m.setAccessible(true);
+            rec("W33 WebViewFactory.getDataDirectorySuffix() = " + m.invoke(null));
+        } catch (Throwable t) {
+            rec("W33 getDataDirectorySuffix() FAIL: " + t.getClass().getSimpleName()
+                    + ": " + t.getMessage());
+        }
+    }
+
+    private void reportApp(String tag, Object app) {
+        if (app instanceof Context) {
+            Context c = (Context) app;
+            rec(tag + ".packageName = " + c.getPackageName());
+            rec(tag + " class = " + c.getClass().getName());
+            try {
+                rec(tag + ".getFilesDir = " + c.getFilesDir());
+            } catch (Throwable t) {
+                rec(tag + ".getFilesDir FAIL: " + t.getClass().getSimpleName());
+            }
+        } else {
+            rec(tag + " = " + app);
         }
     }
 
