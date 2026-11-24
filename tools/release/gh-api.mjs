@@ -204,6 +204,30 @@ if (args[0] === '--dispatch') {
   fs.mkdirSync(path.dirname(out), { recursive: true });
   fs.writeFileSync(out, r.body);
   console.log(`saved ${out} (${r.body.length} bytes)`);
+} else if (args[0] === '--delete-cache') {
+  // 删 Actions 缓存：node tools/release/gh-api.mjs --delete-cache <cache-id> [...more]
+  // 用法场景：CACHE_EPOCH 统一后，旧 epoch 的缓存没人用但继续占配额。
+  const ids = args.slice(1).filter(Boolean);
+  if (ids.length === 0) {
+    console.error('usage: gh-api.mjs --delete-cache <cache-id> [<cache-id> ...]');
+    process.exit(2);
+  }
+  let failed = 0;
+  for (const id of ids) {
+    const r = await request(
+      'api.github.com',
+      `/repos/wentureing/sandboxsensor/actions/caches/${id}`,
+      { Authorization: `Bearer ${token()}` },
+      'DELETE'
+    );
+    if (r.status === 204 || r.status === 200) {
+      console.log(`DELETED cache id=${id} -> HTTP ${r.status}`);
+    } else {
+      failed++;
+      console.error(`DELETE cache id=${id} failed: HTTP ${r.status} ${r.body.toString('utf8').slice(0, 200)}`);
+    }
+  }
+  if (failed > 0) process.exit(1);
 } else {
   const p = args[0];
   if (!p) {
