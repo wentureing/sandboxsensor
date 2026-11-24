@@ -57,3 +57,13 @@
 - `docs/代码镜像/core/hook/JavaIoHooks.md`（Java 层重定向，默认关闭）
 - `docs/记录/记录-假dataDir假设被否证.md`
 - `docs/架构/架构-注入时机审计.md`（为什么"注册点≠生效进程"是个坑）
+
+## 可测性（已落实）
+
+| 可测部分 | 方式 | 用例 |
+| --- | --- | --- |
+| 白名单判断 \isFakeDataDirWhitelisted(packageName)\ | 纯函数，已抽出 | \GuestPathSetupTest\ 3 例（只有探针在内 / 真实应用不在 / 近似包名不匹配） |
+| 开关判断（\guestRedirect\ / \webviewDataDirFake\） | 由 \DebugFlags\ 覆盖 | — |
+| 规则注册、native 同步 | ❌ 需要 native 库 | 靠真机 \debug-trace.log\ 的 \142 registered rules=N\ 验证 |
+
+**已抽出的纯函数**：\isFakeDataDirWhitelisted(packageName: String): Boolean\（v158）。

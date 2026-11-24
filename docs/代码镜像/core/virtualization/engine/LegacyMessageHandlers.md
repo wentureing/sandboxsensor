@@ -47,3 +47,18 @@
 
 - `docs/代码镜像/core/virtualization/engine/ActivityThreadHook.md`（分发与契约）
 - `docs/架构/架构-文件拆分契约模式.md`（拆分原则）
+
+## 可测性（不可纯 JVM 测，原因如下）
+
+| 部分 | 能否单测 | 原因 |
+| --- | --- | --- |
+| 三个 handler 的主体 | ❌ | 全部走反射（\ndroid.app.ActivityThread\、\ActivityClientRecord\ 等），
+JVM 单测里这些类不存在，反射必然失败 —— 而"失败降级"正是被测行为，无法区分"降级正确"与"环境缺失" |
+| 分发入口（\handleMessage\ 的 when 分支） | ❌ | 需要构造 \ActivityThreadHook\（依赖 Context / StubRegistry / VirtualEngine） |
+
+**当前覆盖方式**：
+1. \module-test\ 编译（保证签名、可见性、扩展函数解析正确）；
+2. 真机回归：Via 启动链路会走 \LAUNCH_ACTIVITY\ 分支，观察 \debug-trace.log\ 的 \legacy\ 事件。
+
+**若将来要单测**：需要引入 Robolectric（能提供 \ActivityThread\/\Message\ 的真实行为），
+或在 handler 里把"消息解析"与"反射执行"拆成两步，只测前者。

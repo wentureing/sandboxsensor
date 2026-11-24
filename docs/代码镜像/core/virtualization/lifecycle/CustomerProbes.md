@@ -56,3 +56,12 @@
 
 - `docs/架构/架构-文件拆分契约模式.md`
 - `docs/代码镜像/core/virtualization/lifecycle/VirtualApplicationManager.md`（待补：契约文件本体）
+
+## 可测性（已落实）
+
+| 可测部分 | 方式 | 用例 |
+| --- | --- | --- |
+| 客户类名判断 \isCmccAuthActivity(className)\ | 纯函数，已抽出 | \CustomerProbesTest\ 3 例（只认 CMCC / 其它不认 / 前缀相同也不认） |
+| 视图树遍历、按钮包装 | ❌ 需要真实 Activity + ViewGroup | 目前只能真机回归；若要单测需引入 Robolectric |
+
+**已抽出的纯函数**：\isCmccAuthActivity(className: String): Boolean\（v158，替换掉 3 处硬编码类名比较）。
