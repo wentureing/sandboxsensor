@@ -113,7 +113,7 @@ public class WebViewProbeActivity extends Activity {
         status = new TextView(this);
         status.setTextSize(13);
         status.setPadding(12, 12, 12, 6);
-        status.setText("WebViewProbe v1.18 —— 打开即自动跑全部 W 实验，结果实时显示在下方");
+        status.setText("WebViewProbe v1.19 —— 打开即自动跑全部 W 实验，结果实时显示在下方");
         root.addView(status, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
@@ -304,6 +304,8 @@ public class WebViewProbeActivity extends Activity {
         final File f18 = prepAt("/data/user/0/com.nextvm.app/files/wvprobe18.html");
         // W19：被容器重定向的公共目录
         final File f19 = prepAt("/sdcard/wvprobe19.html");
+        // v1.19：沙箱 + 有 BOM 的对照文件（W2 是无 BOM 的同一个 body）
+        final File fBom = prepareFileRaw("wvprobe_bom.html", HTML_BODY, true);
 
         loadAndCheck("W1", "about:blank", HTML_BODY, false, () ->
             loadAndCheck("W2", ff1 == null ? "about:blank" : "file://" + ff1.getAbsolutePath(),
@@ -329,7 +331,16 @@ public class WebViewProbeActivity extends Activity {
                             : "file://" + f18.getAbsolutePath(), null, false, () ->
                     // W19：被容器重定向的公共目录，测"重定向路径"的 MIME 是否也不同
                     loadAndCheck("W19", f19 == null ? "about:blank"
-                            : "file://" + f19.getAbsolutePath(), null, false, () -> {
+                            : "file://" + f19.getAbsolutePath(), null, false, () ->
+                    // v1.19 四组合：把「BOM」这个干扰项控制住
+                    //   W2  = 沙箱 + 无 BOM  -> text/plain
+                    //   W14 = tmp  + 有 BOM  -> text/html
+                    //   W35a= 沙箱 + 有 BOM  /  W35b= tmp + 无 BOM
+                    // 若 W35a 变 text/html 或 W35b 变 text/plain，则变量是 BOM，与容器无关。
+                    loadAndCheck("W35a", fBom == null ? "about:blank"
+                            : "file://" + fBom.getAbsolutePath(), null, false, () ->
+                    loadAndCheck("W35b", "file:///data/local/tmp/wvprobe_nobom.html",
+                            null, false, () -> {
                                 // W11：强制在 shouldInterceptRequest 里给 text/html
                                 W11_MODE = true;
                                 loadAndCheck("W11", ff1 == null ? "about:blank" : "file://" + ff1.getAbsolutePath(),
@@ -343,7 +354,7 @@ public class WebViewProbeActivity extends Activity {
                                                 status.setText("✅ 全部实验完成 —— 可长按下方文字复制");
                                             });
                                         });
-                            }))))))))));
+                            }))))))))))));
     }
 
     /**
@@ -373,6 +384,25 @@ public class WebViewProbeActivity extends Activity {
             o.close();
             rec("PREP " + name + " -> " + f.getAbsolutePath()
                     + " exists=" + f.exists() + " len=" + f.length());
+            return f;
+        } catch (Throwable t) {
+            rec("PREP " + name + " FAIL: " + t);
+            return null;
+        }
+    }
+
+    /** v1.19：与 prepareFile 相同，但可以决定是否写 UTF-8 BOM（用于 W35 控制 BOM 变量） */
+    private File prepareFileRaw(String name, String body, boolean bom) {
+        try {
+            File f = new File(getFilesDir(), name);
+            FileOutputStream o = new FileOutputStream(f, false);
+            if (bom) {
+                o.write(new byte[] { (byte) 0xEF, (byte) 0xBB, (byte) 0xBF });
+            }
+            o.write(body.getBytes("UTF-8"));
+            o.close();
+            rec("PREP " + name + " -> " + f.getAbsolutePath()
+                    + " exists=" + f.exists() + " len=" + f.length() + " bom=" + bom);
             return f;
         } catch (Throwable t) {
             rec("PREP " + name + " FAIL: " + t);
