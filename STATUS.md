@@ -73,6 +73,7 @@
 | 设备时钟 | 比 PC 快约 1 分 51 秒；日志按**设备时间**切片 |
 | 容器 | `1.0.0-<7位sha>`（`versionCode = GITHUB_RUN_NUMBER`） |
 | 容器 uid | **每次干净安装会变**（`u0_a333` → `u0_a341`）→ **vivo 按 uid 管控日志，guest 的 `Log.i` 会被吞**（诊断请写文件，别依赖 logcat） |
+| **appops 授权** | ⚠️ **每次干净安装（`uninstall` + `install`）都会清掉** `MANAGE_EXTERNAL_STORAGE`、`WRITE_EXTERNAL_STORAGE` 等授权。**结论**：① 干净安装后，任何"能写真实 `/sdcard`"的测试结果都不可信（授权没了）；② **不要拿干净安装前后的权限类测试做对比**；③ 需要授权的导入通道（`/sdcard/Download/`）在干净安装后要**重新授予**才可用，或改用 `/data/local/tmp/`（无需授权） |
 | 签名 | 固定 keystore，SHA-256 `60:AD:A6:9E:…:40:B3:2C` |
 | WebView | Chrome/126.0.6478.71 |
 | 工具链 | Gradle 8.9 / NDK 27.1.12297006 / CMake 3.22.1 |

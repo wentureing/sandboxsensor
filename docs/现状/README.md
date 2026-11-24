@@ -39,6 +39,7 @@
 | 测试设备 | `10AFA8169Z0039G`（vivo V2463A / Android 15 / arm64-v8a / PAGESIZE=4096） |
 | 容器版本 | `1.0.0-<7位sha>`（`versionCode = GITHUB_RUN_NUMBER`，递增） |
 | 容器 uid | 每次干净安装会变（如 `u0_a333` → `u0_a341`）→ **vivo 的日志管控按 uid 生效，guest 的 `Log.i` 可能被吞** |
+| **appops 授权** | ⚠️ **干净安装会清掉** `MANAGE_EXTERNAL_STORAGE` / `WRITE_EXTERNAL_STORAGE` 等授权 → 干净安装前后的**权限类测试结果不可对比**；需要授权的通道（`/sdcard/Download/`）要重新授予，或改用 `/data/local/tmp/`（无需授权） |
 | 签名 | 固定 keystore，SHA-256 `60:AD:A6:…:40:B3:2C` |
 | WebView | Chrome/126.0.6478.71（`/product/app/WebViewGoogle64/`） |
 | Gradle / NDK | Gradle 8.9 / NDK 27.1.12297006 / CMake 3.22.1 |
