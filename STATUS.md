@@ -5,6 +5,29 @@
 
 ---
 
+
+## 2026-11-24 17:20 验证通过（CI #40 / versionCode=40）
+
+三项同时落地并实测：
+
+| # | 项 | 容器提交 | 验证证据 |
+| --- | --- | --- | --- |
+| 1 | **修复双轨沙箱** | 1d3e2bb | iles/virtual 有 apks/apps/data/snapshots；**pp_virtual 不再创建**；data 下 30 个文件 |
+| 2 | **固定签名** | 45a6af2（workflow） | install -r 成功覆盖（不再报 INSTALL_FAILED_UPDATE_INCOMPATIBLE） |
+| 3 | **P0-3 主进程不装 hook** | 4e85a4 + de50a82 + 1631541 | 日志明确：17:19:37.834 initNativeHooks skipped: container main process (proc=com.nextvm.app)（主进程 pid 12930）+ 17:19:38.799 PLT hooks installed successfully（guest 进程 pid 13085） |
+
+**删掉 is_import_read_exempt 的实证**：
+- import exempt 日志命中 **0**
+- APK file not found 命中 **0**
+
+→ 主进程不装 hook 后，installApp 直接读真实 /sdcard/Download/x.apk，**整条豁免机制（p18→p28→p29 三次迭代）全部消失**。
+
+**签名指纹固定为**：
+`
+SHA256: 60:AD:A6:9E:3B:72:E0:97:DB:00:47:CE:DA:02:53:ED:83:6F:FA:3E:F6:2E:9F:10:26:87:63:AB:B2:40:B3:2C
+`
+（Secret DEBUG_KEYSTORE_BASE64；keystore 不在仓库里）
+
 ## 0. 开工前必读
 
 ### 0.1 排查顺序（本项目已绕弯路的教训）
