@@ -133,12 +133,19 @@ jobs:
 
       - name: Publish test report
         if: always()
+        # 报告步骤失败不应该让整个 job 变红（测试本身的失败由上面的 gradlew 步骤决定）。
+        # 踩过：dorny/test-reporter 内部要跑 `git ls-files`，而这里 checkout 的是
+        # 容器源码到 container/ 子目录，工作目录本身不是 git 仓库 -> git exit 128。
+        continue-on-error: true
         uses: dorny/test-reporter@v1
         with:
           name: module-tests
           path: 'container/**/build/test-results/testDebugUnitTest/*.xml'
           reporter: java-junit
           fail-on-error: false
+          fail-on-empty: false
+          # 在容器仓库里执行，让 reporter 的 git 操作有仓库可用
+          working-directory: container
 
       - name: Upload test results
         if: always()
