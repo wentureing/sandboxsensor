@@ -274,9 +274,10 @@ public class WebViewProbeActivity extends Activity {
             }
             try {
                 android.util.TypedValue tv = new android.util.TypedValue();
-                boolean got = res.getValue(id, tv, true);
-                rec(String.format("W7 probe: getValue(0x%08x) got=%b t=0x%x d=0x%x cookie=%d",
-                        id, got, tv.type, tv.data, tv.assetCookie));
+                // 注意：Resources.getValue(int, TypedValue, boolean) 返回 void，不是 boolean
+                res.getValue(id, tv, true);
+                rec(String.format("W7 probe: getValue(0x%08x) t=0x%x d=0x%x cookie=%d",
+                        id, tv.type, tv.data, tv.assetCookie));
             } catch (Throwable t) {
                 rec(String.format("W7 probe: getValue(0x%08x) -> %s",
                         id, t.getClass().getSimpleName()));

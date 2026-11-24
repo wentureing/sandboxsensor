@@ -13,7 +13,15 @@ const TOKEN_FILE = path.join(ROOT, 'token.txt');
 const OUT_FILE = path.join(ROOT, 'probe-reports', 'gh-out.json');
 const PROXY = {
   host: process.env.GH_PROXY_HOST || '127.0.0.1',
-  port: Number(process.env.GH_PROXY_PORT || 7897),
+  // 2026-11-24 修正：默认端口改为 12450。
+  //   项目 AGENTS.md 写的就是 12450（与 IE/系统代理一致），我之前误写成 7897。
+  //   实测（各 3 次）：
+  //     7897  -> 3/3 ECONNRESET "Client network socket disconnected before secure
+  //              TLS connection was established"，每次 5.1s（超时）
+  //     12450 -> 3/3 HTTP 200，每次约 1.5s
+  //   这就是之前 "HTTP 0" 和"下载进度慢"的真因：用错代理端口，不是 GitHub 限流。
+  //   两个端口都在 LISTEN，所以"端口通"不等于"代理能用"。
+  port: Number(process.env.GH_PROXY_PORT || 12450),
 };
 
 function token() {
