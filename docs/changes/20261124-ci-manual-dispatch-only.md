@@ -193,3 +193,33 @@ node tools/release/gh-api.mjs --dispatch probe-build.yml main
 | 1 | 改两个 workflow + AGENTS.md（本文档即计划） |
 | 2 | 按第六节验证：先 push（应 0 触发），再 dispatch 探针一次 |
 | 3 | 在同一文件追加 `## 实际变更` |
+
+---
+
+## 实际变更
+
+- 提交：`5181143`（CI 改动）+ `f9fa81b`、`494c6c7`、`33b8e4b`（探针后续改动，同一 push 链路）
+- 改的文件：
+
+| 文件 | 结果 |
+| --- | --- |
+| `.github/workflows/probe-build.yml` | 删除整个 `on.push`（含 paths），只留 `workflow_dispatch` |
+| `.github/workflows/container-build.yml` | 同上 |
+| `AGENTS.md` | 「CI 触发」一节重写为「只能手动 dispatch，一次一个，明确指定」 |
+
+**与计划的差异**：无。计划里写的是「删除 `on.push` 整段」，实际也是这样。
+
+### 验证结果（按第六节执行）
+
+| 步 | 命令 | 结果 | 判据 |
+| --- | --- | --- | --- |
+| 1 | 记录 run 总数 | `total_count=86` | 基线 |
+| 2 | `git push`（提交 `5181143`→`33b8e4b` 四次 push） | `total_count=86` | ✅ **一个编译都没触发** |
+| 3 | `--dispatch probe-build.yml main` | `HTTP 204` | ✅ 手动触发成功 |
+
+**结论**：`push` 已经不再触发任何编译，编译只能显式 dispatch，一次一个。
+
+### 附：为什么合并提交没问题
+
+现在 `push` 完全不触发编译，所以「一次 push 里同时含 workflow 文件 + 探针源码」不再是问题 ——
+这正是去掉自动触发带来的额外收益（不用再小心翼翼地拆提交）。
