@@ -17,8 +17,11 @@ on:
         default: ':app:assembleDebug'
   push:
     branches: [main]
-    paths:
-      - '.github/workflows/container-build.yml'
+    # 2026-11-24：去掉 paths 过滤。
+    # 原来只写了自己这一个文件，导致改容器源码（在 ShitJumpingVM 仓库）、
+    # 改探针、改文档都不会重建容器 —— 用户要求「一次提交触发两个 CI」。
+    # 现在主仓库任何 push 都会重建容器（容器源码由 workflow 从
+    # wentureing/ShitJumpingVM 的 main 拉取，所以重建即验证最新容器代码）。
 
 permissions:
   contents: write

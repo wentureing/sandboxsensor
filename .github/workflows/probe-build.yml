@@ -13,12 +13,8 @@ on:
         default: arm64-v8a
   push:
     branches: [main]
-    paths:
-      - 'probe/**'
-      - 'gradle/**'
-      - 'settings.gradle.kts'
-      - 'build.gradle.kts'
-      - '.github/workflows/probe-build.yml'
+    # 2026-11-24：去掉 paths 过滤，理由同 container-build.yml ——
+    # 用户要求「一次提交触发两个 CI」。
 
 permissions:
   contents: write
