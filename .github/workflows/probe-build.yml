@@ -145,21 +145,24 @@ jobs:
           KS_PATH="$GITHUB_WORKSPACE/debug.keystore"
           APK=$(find probe/build/outputs/apk -name '*.apk' | head -1)
           echo "APK=$APK"
+          # 两个工具的输出格式不同：keytool 带冒号（60:AD:A6:...），
+          # apksigner 不带冒号（60ADA69E...）。必须归一化后再比，否则必然误报漂移。
           KS_FP=$(keytool -list -v -keystore "$KS_PATH" -storepass android -alias androiddebugkey 2>/dev/null \
-                    | grep 'SHA256:' | head -1 | sed 's/.*SHA256: *//')
+                    | grep 'SHA256:' | head -1 | sed 's/.*SHA256: *//' | tr -d ':' | tr 'a-f' 'A-F')
           APKSIGNER=$(find "$ANDROID_SDK_ROOT/build-tools" -name apksigner -type f 2>/dev/null | sort | tail -1)
           if [ -z "$APKSIGNER" ]; then
             echo "::warning::apksigner 未找到，跳过签名校验"
             exit 0
           fi
           APK_FP=$("$APKSIGNER" verify --print-certs "$APK" 2>/dev/null \
-                    | grep -i 'SHA-256 digest' | head -1 | sed 's/.*: *//' | tr 'a-f' 'A-F')
-          echo "keystore=$KS_FP"; echo "apk=$APK_FP"
-          if [ "${KS_FP^^}" != "${APK_FP}" ]; then
-            echo "::error::探针签名漂移！"
+                    | grep -i 'SHA-256 digest' | head -1 | sed 's/.*: *//' | tr -d ':' | tr 'a-f' 'A-F')
+          echo "keystore=$KS_FP"
+          echo "apk     =$APK_FP"
+          if [ "$KS_FP" != "$APK_FP" ]; then
+            echo "::error::探针签名漂移！keystore=$KS_FP apk=$APK_FP"
             exit 1
           fi
-          echo "::notice::探针签名一致"
+          echo "::notice::探针签名一致（install -r 可用）"
 
       # 产物体面化：不要 app-debug.apk 这种通用名，也不要在 artifact 里带多级目录
       - name: Stage artifact

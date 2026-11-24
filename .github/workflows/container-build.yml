@@ -168,8 +168,10 @@ jobs:
           KS_PATH="$GITHUB_WORKSPACE/debug.keystore"
           APK=$(find container/app/build/outputs/apk -name '*.apk' | head -1)
           echo "APK=$APK"
+          # 两个工具的输出格式不同：keytool 带冒号（60:AD:A6:...），
+          # apksigner 不带冒号（60ADA69E...）。必须归一化后再比，否则必然误报漂移。
           KS_FP=$(keytool -list -v -keystore "$KS_PATH" -storepass android -alias androiddebugkey 2>/dev/null \
-                    | grep 'SHA256:' | head -1 | sed 's/.*SHA256: *//')
+                    | grep 'SHA256:' | head -1 | sed 's/.*SHA256: *//' | tr -d ':' | tr 'a-f' 'A-F')
           echo "keystore SHA256 = $KS_FP"
           # 用 apksigner（build-tools 自带）读 APK 签名
           APKSIGNER=$(find "$ANDROID_SDK_ROOT/build-tools" -name apksigner -type f 2>/dev/null | sort | tail -1)
@@ -178,10 +180,10 @@ jobs:
             exit 0
           fi
           APK_FP=$("$APKSIGNER" verify --print-certs "$APK" 2>/dev/null \
-                    | grep -i 'SHA-256 digest' | head -1 | sed 's/.*: *//' | tr 'a-f' 'A-F')
+                    | grep -i 'SHA-256 digest' | head -1 | sed 's/.*: *//' | tr -d ':' | tr 'a-f' 'A-F')
           echo "APK SHA256      = $APK_FP"
-          if [ "${KS_FP^^}" != "${APK_FP}" ]; then
-            echo "::error::签名漂移！keystore=$KS_FP  APK=$APK_FP"
+          if [ "$KS_FP" != "$APK_FP" ]; then
+            echo "::error::签名漂移！keystore=$KS_FP APK=$APK_FP"
             exit 1
           fi
           echo "::notice::签名一致，install -r 可用"
