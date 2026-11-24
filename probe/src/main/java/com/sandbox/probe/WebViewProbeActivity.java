@@ -113,7 +113,7 @@ public class WebViewProbeActivity extends Activity {
         status = new TextView(this);
         status.setTextSize(13);
         status.setPadding(12, 12, 12, 6);
-        status.setText("WebViewProbe v1.19 —— 打开即自动跑全部 W 实验，结果实时显示在下方");
+        status.setText("WebViewProbe v1.20 —— 打开即自动跑全部 W 实验，结果实时显示在下方");
         root.addView(status, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
@@ -289,6 +289,8 @@ public class WebViewProbeActivity extends Activity {
         // 3) 串联加载实验
         final File ff1 = f1;
         final File ff4 = f4;
+        // v1.20：确认 WebView 视角的 dataDir 与 W2 文件路径的归属关系
+        probeDataDir(ff1 == null ? null : ff1.getAbsolutePath());
         // v1.16：直接问 WebView 内部的 AndroidProtocolHandler，把「W2 为什么 text/plain」定死
         probeProtocolHandler(ff1);
         // W16 用 .txt 扩展名（内容仍是 HTML），测"是否只看扩展名"
@@ -1078,6 +1080,96 @@ public class WebViewProbeActivity extends Activity {
             rec("W34 [" + label + "] FAIL: " + t.getClass().getSimpleName()
                     + ": " + t.getMessage());
         }
+    }
+
+    /**
+     * W36：确认「WebView 视角的 dataDir」与 W2 的文件路径是否同源。
+     *
+     * 假设（待验证）：WebView 对「落在自己 dataDir 下的 file://」走特殊分支（不按扩展名），
+     * 对「外部路径」走标准 FileURLLoader（按扩展名）。这能同时解释：
+     *   W2(沙箱，在 dataDir 下)=text/plain；W14(/data/local/tmp，不在)=text/html；
+     *   Gaia 给 WebView 的 dataDir 是 guest 官方路径，与真实文件位置不一致 -> 反而正常。
+     *
+     * 若 W36 显示 url startsWith(dataDir)=true，则「改 dataDir」这条修法有依据：
+     * URL 仍是真实路径 -> 读取不受影响；只是不再落在 dataDir 下 -> 走标准分支。
+     */
+    private void probeDataDir(String candidateUrlPath) {
+        try {
+            reportDirPaths("W36 this", this);
+            try {
+                Class<?> ag = Class.forName("android.app.AppGlobals");
+                Object app = ag.getMethod("getInitialApplication").invoke(null);
+                if (app instanceof Context) {
+                    reportDirPaths("W36 AppGlobals", (Context) app);
+                }
+                if (app != null) {
+                    java.lang.reflect.Field lf = findFieldUp(app.getClass(), "mLoadedApk");
+                    if (lf != null) {
+                        lf.setAccessible(true);
+                        Object la = lf.get(app);
+                        if (la != null) {
+                            rec("W36 LoadedApk class = " + la.getClass().getName());
+                            java.lang.reflect.Field df = findFieldUp(la.getClass(), "mDataDir");
+                            if (df != null) {
+                                df.setAccessible(true);
+                                rec("W36 LoadedApk.mDataDir = " + df.get(la));
+                            }
+                            java.lang.reflect.Field af =
+                                    findFieldUp(la.getClass(), "mApplicationInfo");
+                            if (af != null) {
+                                af.setAccessible(true);
+                                Object ai = af.get(la);
+                                if (ai instanceof android.content.pm.ApplicationInfo) {
+                                    rec("W36 LoadedApk.mApplicationInfo.dataDir = "
+                                            + ((android.content.pm.ApplicationInfo) ai).dataDir);
+                                    rec("W36 LoadedApk.mApplicationInfo.packageName = "
+                                            + ((android.content.pm.ApplicationInfo) ai).packageName);
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch (Throwable t) {
+                rec("W36 AppGlobals 部分失败: " + t.getClass().getSimpleName()
+                        + ": " + t.getMessage());
+            }
+            if (candidateUrlPath != null) {
+                String myDataDir = getApplicationInfo().dataDir;
+                rec("W36 W2 url path = " + candidateUrlPath);
+                rec("W36 this.dataDir = " + myDataDir);
+                rec("W36 url startsWith(this.dataDir) = "
+                        + (myDataDir != null && candidateUrlPath.startsWith(myDataDir)));
+                rec("W36 url startsWith(/data/user/0/com.nextvm.app/) = "
+                        + candidateUrlPath.startsWith("/data/user/0/com.nextvm.app/"));
+                rec("W36 url startsWith(/data/local/tmp/) = "
+                        + candidateUrlPath.startsWith("/data/local/tmp/"));
+            }
+        } catch (Throwable t) {
+            rec("W36 FAIL: " + t.getClass().getSimpleName() + ": " + t.getMessage());
+        }
+    }
+
+    private void reportDirPaths(String tag, Context c) {
+        try {
+            rec(tag + ".getPackageName = " + c.getPackageName());
+            rec(tag + ".getApplicationInfo().dataDir = " + c.getApplicationInfo().dataDir);
+            rec(tag + ".getDataDir = " + c.getDataDir());
+            rec(tag + ".getFilesDir = " + c.getFilesDir());
+        } catch (Throwable t) {
+            rec(tag + " 读路径失败: " + t.getClass().getSimpleName() + ": " + t.getMessage());
+        }
+    }
+
+    private java.lang.reflect.Field findFieldUp(Class<?> cls, String name) {
+        Class<?> c = cls;
+        while (c != null) {
+            try {
+                return c.getDeclaredField(name);
+            } catch (NoSuchFieldException e) {
+                c = c.getSuperclass();
+            }
+        }
+        return null;
     }
 
     private static String brief(String s) {

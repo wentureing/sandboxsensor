@@ -43,8 +43,8 @@ android {
         applicationId = "com.sandbox.probe"
         minSdk = 30
         targetSdk = 35
-        versionCode = 20
-        versionName = "1.19"
+        versionCode = 21
+        versionName = "1.20"
 
         if (probeAbi != "universal") {
             ndk {
