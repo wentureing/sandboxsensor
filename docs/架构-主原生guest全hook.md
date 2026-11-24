@@ -82,15 +82,15 @@
 | **C. 条件** | `dlopen` / `android_dlopen_ext` / `dl_iterate_phdr` | ⭐ | 只在需要"改加载行为"或"隐藏库列表"时装 | L5 |
 | **D. 待定** | `ptrace` | ❓ | 反调试伪装？现在只打日志 | L5 |
 | **D. 待定** | `connect` / `getaddrinfo` | ❓ | 网络重定向，与路径无关 | L5 |
-| **❌ 不需要** | **`syscall`** | ❌ | **只打日志、原样透传**，纯增加 GOT 痕迹 | — |
-| **❌ 不需要** | **`fork`** | ❌ | 只打日志 | — |
-| **❌ 不需要** | **`mmap` / `mprotect`** | ❌ | 用途不明；hook `mprotect` 尤其危险 | — |
+| **D. 待确认** | `syscall` | ❇ | **纯诊断**（DIAG 日志，能定位是谁在调），未参与拦截 | L5 |
+| **D. 待确认** | `fork` | ❇ | 纯诊断 | L5 |
+| **D. 待确认** | `mmap` / `mprotect` | ❇ | **用途待确认**（可能与 maps 伪造有关） | L5 |
 
 ### 2.3 分级后的清单（21 → 14）
 
 **保留 14 个**：`open`、`openat`、`open64`、`openat64`、`stat`、`lstat`、`access`、`fopen`、`fopen64`、`opendir`、`readlink`、`readlinkat`（新增）、`__system_property_get`、以及条件性的 `dlopen`/`android_dlopen_ext`/`dl_iterate_phdr`/`ptrace`/`connect`/`getaddrinfo`
 
-**删除 3 个**：`syscall`、`fork`、`mmap`+`mprotect`（这两个合计算一个"不改"）
+**保留但标记为「待确认」：`syscall`、`fork`、`mmap`/`mprotect`（不删除，改为可配置开关 `NS_HOOK_DIAG_ONLY`）
 
 **新增 1 个**：`readlinkat`（现代代码用 `readlinkat` 多于 `readlink`）
 
