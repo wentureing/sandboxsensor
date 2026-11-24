@@ -9,9 +9,9 @@
 
 | 优先 | 事项 | 状态 | 文档 |
 | --- | --- | --- | --- |
-| ✅ **完成** | **Java 层文件 I/O 重定向**（v141 `RegisterNatives` + v142 guest 补规则） | **已打通**：W38 写 `/sdcard` 成功且落沙箱 | `../输出/记录/记录-Java层路径重定向打通.md` |
-| **P0** | 把重定向扩到 `stat/lstat/readlink/unlink/rename/mkdir` | 📋 待做（`stat` 最常用） | 同上「下一步候选」 |
-| **P1** | 重新评估「假 dataDir 让 WebView 走标准分支」 | 📋 前提已具备（Java 层 + guest 规则都有了） | `../输出/记录/记录-W2-text-plain机制收敛.md` |
+| ✅ **完成** | **Java 层文件 I/O 重定向语义等价重构**（v148：ErrnoException/EINTR/引用缓存 + 拆分 JavaIoHooks） | 已实现，待真实应用回归 | `../输出/记录/记录-JavaIoHook导致Via不可交互.md`、`../代码镜像/core/hook/JavaIoHooks.md` |
+| **P0** | **语义等价重构清单（后续批次）** | 📋 待逐项执行 | `计划-语义等价重构清单.md` |
+| **P1** | 重新评估「假 dataDir 让 WebView 走标准分支」 | ❌ **已否证**（dataDir 归属不是 MIME 变量） | `../输出/记录/记录-假dataDir假设被否证.md` |
 | **P2** | 补齐注入位置（`setupPathFidelityRedirections` / `registerVirtualSdcard` / `installDeferredProxies`） | 📋 待验证 | `../架构/架构-注入时机审计.md` |
 
 ## 二、待执行（按优先级）
