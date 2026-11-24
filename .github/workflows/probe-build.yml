@@ -1,7 +1,13 @@
 name: build-probe
 
 # 只构建探针 APK；容器骨架（:app）用另一个 workflow。
-# 触发：手动，或改动探针/构建脚本时自动。
+#
+# 触发：**只有 workflow_dispatch**（2026-11-24 改）。
+# 用户要求「要触发编译的 CI 只能触发一次编译，明确指定是容器或者探针编译」。
+# push 的 paths 过滤保证不了「只跑一个」—— 一次提交同时含 probe/** 和
+# .github/workflows/container-build.yml 时两个 workflow 都会跑（已实际发生过）。
+# 所以 push 自动触发全部移除，编译必须显式指定：
+#   node tools/release/gh-api.mjs --dispatch probe-build.yml main
 
 on:
   workflow_dispatch:
@@ -11,15 +17,6 @@ on:
         type: choice
         options: [arm64-v8a, x86_64, universal]
         default: arm64-v8a
-  push:
-    branches: [main]
-    # 探针与容器必须分开触发（用户明确要求「一次一个、分别命令」）。
-    paths:
-      - 'probe/**'
-      - 'gradle/**'
-      - 'settings.gradle.kts'
-      - 'build.gradle.kts'
-      - '.github/workflows/probe-build.yml'
 
 permissions:
   contents: write

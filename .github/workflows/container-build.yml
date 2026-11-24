@@ -2,6 +2,11 @@ name: build-container
 
 # 构建容器骨架（ShitJumpingVM fork），产出 debug APK 用于 T2 对照组。
 # 不修改 ShitJumpingVM 仓库：由本仓库 checkout 其源码后构建。
+#
+# 触发：**只有 workflow_dispatch**（2026-11-24 改）。
+# 用户要求「要触发编译的 CI 只能触发一次编译，明确指定是容器或者探针编译」。
+# 一次一个，显式指定：
+#   node tools/release/gh-api.mjs --dispatch container-build.yml main
 
 on:
   workflow_dispatch:
@@ -15,12 +20,6 @@ on:
       task:
         description: 'Gradle 任务'
         default: ':app:assembleDebug'
-  push:
-    branches: [main]
-    # 探针与容器必须分开触发（用户明确要求「一次一个、分别命令」）。
-    # 本 workflow 只在自己文件变化时自动触发；容器源码改动后手动 dispatch 一次。
-    paths:
-      - '.github/workflows/container-build.yml'
 
 permissions:
   contents: write

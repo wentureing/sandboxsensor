@@ -156,28 +156,50 @@ git -C _ref/ShitJumpingVM diff --stat >> docs/changes/<date>-<task>.actual.diff
 `DiagnosticsSink` 半成品、WebView hook 先加后回退、`CACHE_EPOCH` 基于错误诊断清理缓存。
 **落盘 + 等确认** 是最便宜的纠错点。
 
-## CI 触发：探针与容器**分开**，一次一个，分别命令
+## CI 触发：**只能手动 dispatch，一次一个，明确指定**
 
-**规则（2026-11-24 定，我理解错过一次，这里是更正版）**：
+**规则（2026-11-24 定；`push` 自动触发已全部移除）**：
 
-> **探针与容器是两个独立的 workflow，必须分开触发，各自一次。**
-> **不要指望一次 push 触发两个，也不要一次 dispatch 两个。**
+> **两个编译 workflow 都只有 `workflow_dispatch`，没有 `push`。**
+> **要编译，必须明确指定是 `probe-build.yml` 还是 `container-build.yml`，一次一条命令。**
 >
-> 用户的原话：「探针和容器要分开，不要一起 ci。一次一个，分别命令。」
+> 用户的原话：「要触发编译的 CI 只能触发一次编译，明确指定是容器或者探针编译。」
+
+### 为什么去掉自动触发
+
+`push` 的 `paths` 是按「变更集里有没有这些文件」判断的。一次 push 同时改了
+`probe/**` 和 `.github/workflows/container-build.yml`，**两个 workflow 都会跑** ——
+这不是配置写错，是「自动触发」这个机制本身保证不了「只跑一个」。
+
+2026-11-24 实际发生过（我一次 push 同时含 workflow 文件和 probe 源码）：
+
+```
+45386771719  build-probe      push   2852d50   <- 预期
+45386771274  build-container  push   2852d50   <- 不该跑
+```
+
+详见 `docs/changes/20261124-ci-manual-dispatch-only.md`。
 
 ### 正确的触发方式
 
-| 场景 | 怎么做 |
+| 场景 | 命令（一次一条） |
 | --- | --- |
-| **改了探针**（`probe/**` 等） | push 主仓库 → `build-probe` 自动触发一次（`paths` 过滤保证只它跑） |
-| **改了容器源码**（`wentureing/ShitJumpingVM`） | 主仓库感知不到 → **手动 dispatch 一次**：`node tools/release/gh-api.mjs --dispatch container-build.yml main` |
-| **改了文档/工具** | 两个都不该跑（`paths` 会过滤掉） |
+| **改了探针**（`probe/**` 等） | `node tools/release/gh-api.mjs --dispatch probe-build.yml main` |
+| **改了容器源码**（`wentureing/ShitJumpingVM`） | `node tools/release/gh-api.mjs --dispatch container-build.yml main` |
+| **改了文档/工具/workflow** | 什么都不跑 |
 
-**关键**：**一次只 dispatch 一个 workflow，且只调一次。**
+**`push` 不再触发任何编译** —— 所以 push 文档、push workflow 文件都是安全的。
 
-### 2026-11-24 犯的两个错
+### 违反判据（自查）
 
-**错误 1：我曾经 push 后又 dispatch**
+- 同一个 `head_sha` 出现**两个** run
+- 同一个 workflow 出现**两个** run
+
+以上任一 → 就是违反本规则。触发后**不要**为了「保险」再 dispatch 第二次。
+
+### 历史教训（为什么现在这么定）
+
+**教训 1：push 后又 dispatch**
 
 ```
 #29  build-probe      cancelled  push               <- push 自动触发
@@ -188,21 +210,23 @@ git -C _ref/ShitJumpingVM diff --stat >> docs/changes/<date>-<task>.actual.diff
 三个 run 撞在同一个 `concurrency` group（`cancel-in-progress: true`）→ **全部互相取消**，
 一个可用产物都没有。
 
-**错误 2：我一度把 `paths` 过滤删掉，想"一次 push 触发两个"**
+**教训 2：靠 `paths` 过滤保证「只跑一个」是不可靠的**
 
-这是**理解错用户意图**。用户的「一次两个 CI」意思是「**两个都要跑，但要分开、各一次**」，
-不是「同一个提交同时触发两个」。已恢复 `paths`。
+我一度以为 `paths` 过滤能保证「改探针只跑探针」，实际它只看变更集里**有没有**那些文件。
+只要一次提交同时碰到两边，两个都会跑（见上）。
 
-### 为什么容器必须手动 dispatch
+**→ 所以现在改成：编译只能显式 dispatch。**
+
+### 为什么容器一直都要手动 dispatch
 
 容器源码在**独立仓库** `wentureing/ShitJumpingVM`，
 主仓库的 `container-build.yml` 是通过 `actions/checkout` 从那个仓库拉代码的，
-所以**主仓库 push 与容器代码变化无关**，无法自动感知。
+所以**主仓库 push 与容器代码变化无关**，从来就无法自动感知。
 
 ### 排查 CI "看起来像故障" 的第一件事
 
 看 `event` 字段：`push` 还是 `workflow_dispatch`。
-如果同一个 `head_sha` 出现多个 run，先怀疑**重复触发**，而不是 workflow 配置问题。
+**现在不应该再出现 `push` 的编译 run** —— 出现就是配置被改回去了。
 
 ---
 
