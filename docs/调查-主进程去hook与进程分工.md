@@ -8,7 +8,7 @@
   ④ WebView 的代理调用是否需要分配给另一个进程
   ⑤ CmdReceiver 接受命令后启动测试，**希望测试本身运行在 hook 的进程**
   ⑥ 继续调查影响范围
-- 结论先给：**主进程不装 hook 的阻力比预想小得多**（`AntiDetectionEngine` 整套是死代码），
+- 结论先给：**主进程不装 hook 的阻力比预想小**（`AntiDetectionEngine` 的 `enableAntiDetection` 静态搜索无调用点，但需实测确认），
   **但"测试移到 hook 进程"需要一个新的进程内命令通道**
 
 ---
@@ -25,15 +25,20 @@
 | 4 | `SandboxManager.collectProbeOutput` | 读沙箱文件（真实路径） | ❌ 不需要 | ✅ 变好 |
 | 5 | `SandboxManager.listProbeOutput` | 同上 | ❌ 不需要 | ✅ 变好 |
 | 6 | `uninstallApp` | 删沙箱文件（真实路径） | ❌ 不需要 | ✅ 变好 |
-| 7 | `AntiDetectionEngine.initialize()` | **只打日志**（见 §1.2） | — | ✅ 无影响 |
-| 8 | `AntiDetectionEngine.hookRootChecks()` 等 | 19 处 `hidePath` | — | ⚠️ **本来就是死代码**（见 §1.2） |
+| 7 | `AntiDetectionEngine.initialize()` | **只打日志**（见 §1.2） | — | ✅ 无影响（但需确认 ``enableAntiDetection`` 是否在别处被调） |
+| 8 | `AntiDetectionEngine.hookRootChecks()` 等 | 19 处 `hidePath` | — | ❓ **接线状态未确认**（见 §1.2.5 验证方案） |
 
 **关键结论**：
 > **主进程的所有文件访问用的都是"真实路径"**（`/sdcard/...` 是真实的，沙箱路径也是真实的），
 > **所以主进程根本不需要"地址转换"，它需要的是"不要被转换"。**
 > **不装 hook 正好满足这个需求。**
 
-### 1.2 关键发现：`AntiDetectionEngine` 整套是**死代码**
+### 1.2 `AntiDetectionEngine` 的接线状态：**静态搜索未发现调用，但需实测确认**
+
+> ⚠️ **这一节曾被写成"整套是死代码"，那是个过早的结论。**
+> 静态搜索为空 **≠** 运行时没执行。下面先列出所有可能的间接调用路径，再给验证方案。
+
+#### 1.2.1 代码结构
 
 ```kotlin
 // AntiDetectionEngine.kt:140
@@ -46,24 +51,71 @@ fun initialize() {
 // AntiDetectionEngine.kt:161 —— 真正干活的方法
 fun enableAntiDetection(instanceId: String, level: DetectionLevel = DetectionLevel.MODERATE) {
     instanceLevels[instanceId] = level
-    hookRootChecks()          // ← 19 处 hidePath 都从这里来
-    hookEmulatorChecks()
+    hookRootChecks()          // ← 19 处 hidePath 都从这里来（L167）
+    hookEmulatorChecks()      // L168
     if (level >= DetectionLevel.MODERATE) { hookVirtualEnvChecks(); hookXposedChecks() }
     if (level >= DetectionLevel.AGGRESSIVE) { hookStackTraceCleanup() }
 }
 ```
 
-**全仓库搜索 `enableAntiDetection`**：**只有定义，零调用**。
+#### 1.2.2 静态搜索的结果（**只说明"没有直接调用"**）
 
-**所以**：
-- **19 处 `hidePath` 从未执行过**
-- **容器现在完全没有"隐藏自己"的能力**
-- **`P16`（容器 dataDir 可 stat）失败不是 bug，是功能压根没启用**
-- **`AntiDetectionEngine` 的 400+ 行是死代码**
+| 搜索项 | 结果 |
+| --- | --- |
+| `enableAntiDetection` 字面量 | 只有定义（L161） |
+| `hookRootChecks` / `hookEmulatorChecks` / `hookVirtualEnvChecks` / `hookXposedChecks` / `hookStackTraceCleanup` | 只在 `enableAntiDetection` 内调用（L167–176）+ 各自定义 |
+| `AntiDetectionEngine` 的注入点 | 只有 `VirtualEngine`（L87），只调 `initialize()`（L291） |
+| `init { }` 块自调用 | 无 |
+| 直接反射（`getMethod("enableAntiDetection")`） | 无 |
 
-**这对 P0-3 的意义**：
-> **主进程不装 hook 不会破坏 anti-detection，因为它本来就没在跑。**
-> **P0-3 的风险从"中"降到"低"。**
+#### 1.2.3 **仍然存在的六种间接调用可能**（静态搜索覆盖不到）
+
+| # | 途径 | 为什么搜不到 | 本项目有没有先例 |
+| --- | --- | --- | --- |
+| 1 | **Hilt `@EntryPoint` 动态获取** | 按类型取，不是按方法名 | ✅ **`CmdReceiver` 就是这么拿 `VirtualEngine` 的**（`EntryPointAccessors.fromApplication`） |
+| 2 | **字符串拼接的反射** | `"enable" + "AntiDetection"` 之类 | 未发现，但无法排除 |
+| 3 | **Kotlin 反射**（`::class.members`） | 按名字遍历，源码里没有方法名 | 未发现 |
+| 4 | **接口 / 抽象类间接调用** | 如果有个接口声明了同名方法 | 需检查是否有 `interface` 包装 |
+| 5 | **JNI / native 回调** | native 层 `CallVoidMethod` | 未检查 |
+| 6 | **AIDL / Binder** | 跨进程调用 | 未检查 |
+
+**第 1 条尤其重要**：本项目已经在用 Hilt 的 `EntryPointAccessors`（`CmdReceiver` 里 7 处），
+所以"某处通过 EntryPoint 拿到 `AntiDetectionEngine` 再调 `enableAntiDetection`"是**完全可能的**。
+
+#### 1.2.4 已有的实测线索（**但不能定论**）
+
+| 实测 | 结果 | 能说明什么 |
+| --- | --- | --- |
+| 探针 `P16`（容器 dataDir 可 stat） | `exists=true canRead=true` | **两义**：<br>① `hidePath` 没生效（未调用）<br>② 调用了，但 `hidePath("/data/data/com.nextvm.app")` 的**精确匹配**没命中 `P16` 查的路径 |
+
+**关键**：`hidePath` 加的是 `/data/data/<HOST_PACKAGE>`，
+而 `P16` 可能查的是 `/data/user/0/<HOST_PACKAGE>` —— **两个不同字符串**。
+所以 `P16` 失败**不能区分**"没调用"和"调用了但路径不匹配"。
+
+#### 1.2.5 验证方案（**加日志，跑一次就知道**）
+
+| 步 | 做法 | 判据 |
+| --- | --- | --- |
+| 1 | 在 `enableAntiDetection` 入口加 `LOGI("enableAntiDetection: $instanceId level=$level")` | — |
+| 2 | 在 `hookRootChecks()` 入口加 `LOGI("hookRootChecks: hiding ${g_hidden_paths.size} paths")` | — |
+| 3 | 装一个 guest 并启动 | 看 logcat |
+| 4 | 判据 | **有日志 → 在跑（我之前的判断错）**；无日志 → 确认未接线 |
+
+**成本**：约 10 行日志 + 一次 guest 启动。**这是唯一能定论的方法。**
+
+#### 1.2.6 对 P0-3 的影响（**结论不变，但理由要谨慎**）
+
+无论 `AntiDetectionEngine` 是否在跑：
+
+| 情况 | P0-3（主进程不装 hook）的影响 |
+| --- | --- |
+| **未接线** | 无影响 |
+| **在跑（在 guest 进程调用）** | 无影响（guest 进程仍装 hook） |
+| **在跑（在主进程调用）** | ⚠️ **会失效** —— 但 `hidePath` 在主进程本来就没意义（主进程不需要隐藏自己） |
+
+**所以 P0-3 仍然是安全的**，但**理由不是"它是死代码"，而是"它即使跑，也应该在 guest 进程跑"**。
+
+**并且**：如果验证发现它**确实在主进程跑**，那反而是个 bug（浪费 + 无效），应该在 P0-3 里顺手改成 guest 进程调用。
 
 ### 1.3 已存在的进程判断能力（可复用）
 
@@ -257,7 +309,7 @@ LIST / UNINSTALL / COLLECT_OUT → 主进程直接做（都是真实路径操作
 
 | 改动 | 影响 | 风险 |
 | --- | --- | --- |
-| **主进程不装 hook** | ①`installApp` 不再需要豁免 ②可删 `is_import_read_exempt` ③`AntiDetectionEngine` 无影响（死代码） | **低**（比预想低） |
+| **主进程不装 hook** | ①`installApp` 不再需要豁免 ②可删 `is_import_read_exempt` ③`AntiDetectionEngine` 需先验证接线状态（§1.2.5） | **低**（比预想低，理由见 §1.2.6） |
 | **新增 `:probe` 进程** | manifest +1 个 Service + `CmdReceiver` 转发 | 低 |
 | **`RealPathService`（AIDL）** | 新组件；guest 进程要改调用方式 | 中（要改 guest 侧的读文件逻辑） |
 | **WebView 代读** | 依赖 `RealPathService` | 中高（P1-3 本身） |
@@ -278,7 +330,7 @@ LIST / UNINSTALL / COLLECT_OUT → 主进程直接做（都是真实路径操作
 
 | 用户的问题 | 答案 |
 | --- | --- |
-| **不应给主进程装 hook** | ✅ **对**，而且**阻力比预想小** —— `AntiDetectionEngine` 19 处 `hidePath` 是死代码（`enableAntiDetection` 零调用） |
+| **不应给主进程装 hook** | ✅ **对**，阻力比预想小 —— `AntiDetectionEngine` 的 19 处 `hidePath` **静态搜索无调用点，但六种间接途径未排除**（§1.2.3），需按 §1.2.5 加日志实测 |
 | **主进程也需要地址转换能力** | ❌ **不需要** —— 主进程所有访问用的都是真实路径，它需要的是"不被转换" |
 | **可能分配给另一个进程** | ✅ **需求真实存在，但方向相反** —— 不是"把转换能力给别的进程"，而是"**把读取能力留在主进程**，让 guest 通过 fd 来取" |
 | **WebView 代读是否分给另一个进程** | ✅ **需要** —— guest 进程注入、主进程读取，用 `ParcelFileDescriptor` 连 |
