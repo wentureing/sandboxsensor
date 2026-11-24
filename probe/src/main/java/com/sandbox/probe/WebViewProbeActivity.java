@@ -113,7 +113,7 @@ public class WebViewProbeActivity extends Activity {
         status = new TextView(this);
         status.setTextSize(13);
         status.setPadding(12, 12, 12, 6);
-        status.setText("WebViewProbe v1.13 —— 打开即自动跑全部 W 实验，结果实时显示在下方");
+        status.setText("WebViewProbe v1.14 —— 打开即自动跑全部 W 实验，结果实时显示在下方");
         root.addView(status, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
@@ -276,6 +276,8 @@ public class WebViewProbeActivity extends Activity {
         // 2.5) WebView 已建好，这时才能查 Context/Assets 身份
         probeContextIdentity();
         probeAssetsIdentity();
+        // v1.14: WebView **内部**看到的 application context（chromium ContextUtils）
+        probeContextUtils();
 
         // 3) 准备文件
         File f1 = prepareFile(HTML_NAME, HTML_BODY);
@@ -441,6 +443,62 @@ public class WebViewProbeActivity extends Activity {
             }
         } catch (Throwable t) {
             rec("W12 FAIL: " + t.getClass().getSimpleName() + ": " + t.getMessage());
+        }
+    }
+
+    /** W31：WebView 内部（chromium）认为的 application context 是谁 */
+    private void probeContextUtils() {
+        try {
+            Class<?> factory = Class.forName("android.webkit.WebViewFactory");
+            Method gp = factory.getDeclaredMethod("getProviderClass");
+            gp.setAccessible(true);
+            Class<?> providerClass = (Class<?>) gp.invoke(null);
+            rec("W31 providerClass = " + (providerClass == null ? "null" : providerClass.getName()));
+            if (providerClass == null) {
+                rec("W31 skip: providerClass 为 null（WebView 还没初始化？）");
+                return;
+            }
+            ClassLoader cl = providerClass.getClassLoader();
+            rec("W31 glue classloader = " + cl);
+            Class<?> cu = Class.forName("org.chromium.base.ContextUtils", false, cl);
+            // 静态字段名多候选（随 WebView 版本可能变）
+            for (String fn : new String[] { "sApplicationContext", "sAppContext" }) {
+                try {
+                    java.lang.reflect.Field f = cu.getDeclaredField(fn);
+                    f.setAccessible(true);
+                    Object v = f.get(null);
+                    if (v instanceof Context) {
+                        Context c = (Context) v;
+                        rec("W31 field " + fn + " = " + c.getPackageName()
+                                + " (" + c.getClass().getName() + ")");
+                    } else {
+                        rec("W31 field " + fn + " = " + v);
+                    }
+                } catch (NoSuchFieldException e) {
+                    rec("W31 field " + fn + " 不存在");
+                }
+            }
+            try {
+                Method gm = cu.getMethod("getApplicationContext");
+                Object c = gm.invoke(null);
+                if (c instanceof Context) {
+                    Context ctx = (Context) c;
+                    rec("W31 getApplicationContext().packageName = " + ctx.getPackageName());
+                    rec("W31 getApplicationContext() class = " + ctx.getClass().getName());
+                    try {
+                        rec("W31 getApplicationContext().getFilesDir = " + ctx.getFilesDir());
+                    } catch (Throwable t) {
+                        rec("W31 getFilesDir FAIL: " + t.getClass().getSimpleName());
+                    }
+                } else {
+                    rec("W31 getApplicationContext() = " + c);
+                }
+            } catch (Throwable t) {
+                rec("W31 getApplicationContext() FAIL: " + t.getClass().getSimpleName()
+                        + ": " + t.getMessage());
+            }
+        } catch (Throwable t) {
+            rec("W31 FAIL: " + t.getClass().getSimpleName() + ": " + t.getMessage());
         }
     }
 
