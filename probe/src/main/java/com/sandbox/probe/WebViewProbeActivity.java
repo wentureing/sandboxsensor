@@ -328,10 +328,34 @@ public class WebViewProbeActivity extends Activity {
                                 loadAndCheck("W11", ff1 == null ? "about:blank" : "file://" + ff1.getAbsolutePath(),
                                         null, true, () -> {
                                             W11_MODE = false;
-                                            rec("DONE all experiments (W11 intercepted " + w11InterceptCount + " request(s))");
-                                            status.setText("✅ 全部实验完成 —— 可长按下方文字复制");
+                                            rec("W11 结束（W11_MODE 已复位），接着跑 W30");
+                                            // v1.13：W30 必须被调用 —— 它验证「反射包装 client」这条路
+                                            runW30(ff1, () -> {
+                                                rec("DONE all experiments (W11 intercepted " + w11InterceptCount + " request(s))");
+                                                dumpReportToLogcat();
+                                                status.setText("✅ 全部实验完成 —— 可长按下方文字复制");
+                                            });
                                         });
                             }))))))))));
+    }
+
+    /**
+     * v1.13：跑完把完整报告重打一遍 logcat。
+     *
+     * 为什么需要：Gaia 这类容器的沙箱 adb 读不到（内部路径 Permission denied、
+     * run-as 不可用、无 root），**logcat 是唯一设备级的出口**。逐行打的日志可能
+     * 被缓冲冲掉，所以结尾再整篇重放一次，一次 `adb logcat -d -s WVP` 就能拿全。
+     */
+    private void dumpReportToLogcat() {
+        List<String> snapshot;
+        synchronized (this) {
+            snapshot = new ArrayList<>(lines);
+        }
+        Log.i(TAG, "===== WVP REPORT BEGIN (" + snapshot.size() + " lines) =====");
+        for (String l : snapshot) {
+            Log.i(TAG, "R| " + l);
+        }
+        Log.i(TAG, "===== WVP REPORT END =====");
     }
 
     private File prepareFile(String name, String body) {
