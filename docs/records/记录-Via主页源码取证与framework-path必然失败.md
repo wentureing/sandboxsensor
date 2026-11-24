@@ -8,6 +8,15 @@
 
 ---
 
+> ## 更正声明
+>
+> 1. bindViaFrameworkLoadedApk 里的 Via 是介词「通过」，不是 Via 浏览器。它是 bind via framework LoadedApk，对所有应用通用。
+> 2. 「必然失败」的结论已作废：breadcrumb 证明 framework makeApplication exit app=mark.via.BrowserApp。Log.wtf 是噪音。
+>
+> 详见 记录-澄清-bindVia是通用路径不是Via专属.md。本文其余部分（截图、堆栈、五个问题的存在性）仍有参考价值。
+
+---
+
 ## 一、现场取证（截图 + UI dump）
 
 ### 1.1 截图内容（`probe-reports/via-screen.png`）
