@@ -83,6 +83,88 @@
 
 ---
 
+## 四之二、v1.12 实测结果（本轮真正定死机制的一段）
+
+探针 v1.12（`probe-2852d50-arm64-v8a.apk`，实例 `com.sandbox.probe_1795520690390`）。
+`onPageFinished` 现在返回 `JSON.stringify({ct, body})`，**`ct` 就是 WebView 自己判定的 MIME**。
+
+| 实验 | URL | **contentType** | body | 说明 |
+| --- | --- | --- | --- | --- |
+| W1 | `about:blank` | `text/html` | 渲染后的 innerText | 对照 |
+| W2 | `file://…/virtual/data/<inst>/files/wvprobe.html` | **`text/plain`** | 源码 | |
+| W3 | `file:///android_asset/wvprobe.html` | `text/html` | `EMPTY` | 另一问题（asset 打不开） |
+| W4 | 同上另一个 `.html` | **`text/plain`** | 源码 | |
+| W14 | `file:///data/local/tmp/wvprobe_tmp.html` | **`text/html`** | 正常 | |
+| W15 | 沙箱 + `?x=.html` | **`text/plain`** | 源码 | |
+| W16 | 沙箱 `.txt`（内容是 HTML） | **`text/plain`** | 源码 | |
+| W17 | 沙箱 `pushedup.html`（**adb 放入**，非 guest 写） | **`text/plain`** | 源码 | **写入者不是变量** |
+| **W17′** | 同一个 W17 文件，内容改成 **`GIF89a` 开头** | **`image/gif`** | `EMPTY` | ⭐ **MIME 来自内容嗅探** |
+| W18 | `file:///data/user/0/com.nextvm.app/files/wvprobe18.html`（私有目录**根**） | **`text/plain`** | 源码 | 与 `virtual/data` 路径段无关 |
+| W19 | `file:///sdcard/wvprobe19.html` | `text/html` | `EMPTY` | **无效**：guest 写 `/sdcard` 报 `EPERM`，文件没创建 |
+| W11 | 沙箱 + 主动返回 `text/html` | `text/html` | 正常 | 方案 A |
+
+### 关键实验：把 W14 的文件换成**符号链接**
+
+```powershell
+ln -sf '/data/user/0/com.nextvm.app/files/virtual/data/<inst>/files/wvprobe.html' \
+       /data/local/tmp/wvprobe_tmp.html
+```
+
+结果：
+
+```
+W14 url=file:///data/local/tmp/wvprobe_tmp.html -> {"ct":"text/html","body":"EMPTY"}
+W2  url=file:///data/user/0/com.nextvm.app/.../wvprobe.html -> {"ct":"text/plain","body":"<html>..."}
+```
+
+- 内容 `EMPTY`：符号链接目标在容器私有目录，`/data/local/tmp` 前缀被豁免、不重定向 → 读不到目标（预期）
+- **但 `ct` 仍是 `text/html`** → 即使指向的是沙箱里的同一个 inode，只要 URL 前缀是 `/data/local/tmp`，MIME 就按**扩展名**判
+
+**→ 决定 MIME 判定方式的是 URL 路径前缀，不是文件的真实位置/属主/写入者。**
+
+---
+
+## 四之三、机制结论（可落地）
+
+**F-D（定死了）**：沙箱前缀（`/data/user/0/com.nextvm.app/...`）的 `file://` 请求，
+MIME **来自内容嗅探** `java.net.URLConnection.guessContentTypeFromStream(stream)`，
+而**不是**扩展名。
+
+依据：W17′ 的扩展名是 `.html`，却因为内容以 `GIF89a` 开头被判成 `image/gif`。
+`guessContentTypeFromStream` **只认少数魔数**（Java 序列化 `AC ED` / GIF / JPEG / PNG），
+**HTML 没有魔数 → 返回 null → 上层用默认 `text/plain`**。
+
+这与 AOSP `AndroidProtocolHandler.java` 的兜底分支**逐行吻合**：
+
+```java
+// chromium android_webview/java/src/org/chromium/android_webview/AndroidProtocolHandler.java
+} else if (uri.getScheme().equals(FILE_SCHEME)
+        && path.startsWith(nativeGetAndroidAssetPath())) {
+    String mimeType = URLConnection.guessContentTypeFromName(path);   // ← 只有 asset 路径按名字
+    if (mimeType != null) return mimeType;
+}
+// Fall back to sniffing the type from the stream.   ← 其它一律嗅探
+return URLConnection.guessContentTypeFromStream(stream);
+```
+
+**F-E**：`/data/local/tmp/...` 前缀的 `file://` 走的是**按扩展名**判定的加载器（native file loader），
+所以同一个 HTML 能正常渲染。**同一个 WebView、同一进程，两条前缀走两套 MIME 判定。**
+
+**尚未解释的部分（如实记录）**：为什么容器内「容器 app 私有目录」前缀会落到 Java 的嗅探分支，
+而 `/data/local/tmp` 不会。容器源码里：
+
+- `native-hook.cpp` 的 `redirect_path()` 是**字符串前缀替换**（`g_path_redirects`），
+  只影响 `open/openat/fopen/stat` 等调用的**入参路径**，不参与 MIME 判定
+- `NS_HOOK_SYSTEM_LIBS=0` → `libwebviewchromium` 未被 patch
+- 容器 Java 层没有 `AndroidProtocolHandler` / `MimeTypeMap` / `shouldInterceptRequest` 相关 hook
+
+也就是说：**「改路径映射就能修好 MIME」这条路不成立**（MIME 不走路径判定，走的是内容嗅探），
+W14 当初给出的"改 VirtualContext 就行"的乐观分支已被本轮结果否掉。
+
+**→ 修复只剩一层可选：在 `shouldInterceptRequest` 补 MIME（方案 A），W11 已验证有效。**
+
+---
+
 ## 五、下一步（v1.12）
 
 探针 v1.12（本次改动，未构建）：

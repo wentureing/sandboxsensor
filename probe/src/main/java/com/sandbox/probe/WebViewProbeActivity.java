@@ -49,6 +49,13 @@ import java.util.concurrent.atomic.AtomicReference;
  *   W19  file:///sdcard/wvprobe19.html                <- 被容器重定向的公共目录
  *   所有实验的 onPageFinished 都追加 document.contentType，用来直接确认 MIME
  *
+ * v1.13 追加（W30：模拟容器的 client 包装 —— 修复方案 A 的预演）：
+ *   容器将来的修法是「应用 setWebViewClient 之后，反射把 WebViewClient 字段换成包装 client」。
+ *   W30 用**同样的反射手法**验证三件事：
+ *     ① WebView 里能否反射找到 WebViewClient 类型字段
+ *     ② 包装后内层（应用的）client 还会不会被调用
+ *     ③ 包装补 MIME 后沙箱路径的 HTML 能否正常渲染
+ *
  * 实验矩阵（v1.10）：
  *   W8   webView.getContext() 是谁（packageName / class / identityHash）
  *   W12  webView.getContext().getAssets() 是否等于 this.getAssets()
@@ -95,7 +102,7 @@ public class WebViewProbeActivity extends Activity {
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         status = new TextView(this);
-        status.setText("WebViewProbe v1.12 running...");
+        status.setText("WebViewProbe v1.13 running...");
         root.addView(status, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         setContentView(root);
@@ -120,7 +127,7 @@ public class WebViewProbeActivity extends Activity {
             if (out == null) {
                 File f = new File(getFilesDir(), "wvprobe-result.txt");
                 out = new FileOutputStream(f, false);
-                Log.i(TAG, "# WebViewProbe v1.12, filesDir=" + getFilesDir());
+                Log.i(TAG, "# WebViewProbe v1.13, filesDir=" + getFilesDir());
             }
             out.write((s + "\n").getBytes("UTF-8"));
             out.flush();
@@ -483,6 +490,172 @@ public class WebViewProbeActivity extends Activity {
                 main.post(next::run);
             } else if (System.currentTimeMillis() > deadline) {
                 rec(tag + " url=" + url + " -> timeout(8s)");
+                main.post(next::run);
+            } else {
+                main.postDelayed(poll[0], 200);
+            }
+        };
+        main.postDelayed(poll[0], 200);
+    }
+
+    // ------------------------------------------------ W30：模拟容器的 client 包装
+
+    // 目的：容器将来要做的动作是"应用 setWebViewClient 之后，用反射把 mWebViewClient
+    // 字段换成一个尊重应用、但对 file:// 补 MIME 的包装 client"。
+    // W11 只证明"自己返回 text/html 就能渲染"，没证明"包装别人的 client"这条路可行。
+    // W30 用和容器完全一样的反射手法做一遍，验证三件事：
+    //   ① WebView 里能不能反射找到 WebViewClient 字段
+    //   ② 包装后内层（应用的）client 还会不会被调用
+    //   ③ 包装补 MIME 后沙箱路径的 HTML 能不能正常渲染
+
+    private CountDownLatch w30Latch;
+    private final AtomicReference<String> w30Outcome = new AtomicReference<>("timeout(8s)");
+    private int w30AppCalls = 0;
+
+    /** 与容器将来实现等价的包装 client */
+    private final class MimeFixClient extends WebViewClient {
+        private final WebViewClient orig;
+
+        MimeFixClient(WebViewClient orig) {
+            this.orig = orig;
+        }
+
+        @Override
+        public WebResourceResponse shouldInterceptRequest(WebView v, WebResourceRequest req) {
+            // 1) 先问应用的 client（Via 处理 homepage.css 走这里）
+            WebResourceResponse fromApp = null;
+            if (orig != null) {
+                try {
+                    fromApp = orig.shouldInterceptRequest(v, req);
+                } catch (Throwable t) {
+                    rec("W30 应用 client 抛异常: " + t);
+                }
+            }
+            if (fromApp != null) {
+                rec("W30 应用 client 返回了响应，交回应用");
+                return fromApp;
+            }
+            // 2) 应用返回 null 且是 file:// 才接管
+            Uri u = req == null ? null : req.getUrl();
+            if (u == null || !"file".equals(u.getScheme())) return null;
+            String path = u.getPath();
+            if (path == null) return null;
+            try {
+                if (path.startsWith("/android_asset/")) {
+                    String rel = path.substring("/android_asset/".length());
+                    rec("W30 接管 asset -> " + mimeFor(rel));
+                    return new WebResourceResponse(mimeFor(rel), "utf-8",
+                            getAssets().open(rel, AssetManager.ACCESS_STREAMING));
+                }
+                File f = new File(path);
+                if (!f.isFile()) {
+                    rec("W30 文件不存在，放弃接管: " + path);
+                    return null;
+                }
+                String mime = mimeFor(path);
+                rec("W30 接管 file:// -> " + mime + " len=" + f.length());
+                return new WebResourceResponse(mime, "utf-8", new java.io.FileInputStream(f));
+            } catch (Throwable t) {
+                rec("W30 接管失败: " + t.getClass().getSimpleName() + ": " + t.getMessage());
+                return null;
+            }
+        }
+
+        @Override
+        public void onPageFinished(WebView v, String u) {
+            if (orig != null) {
+                try {
+                    orig.onPageFinished(v, u);
+                } catch (Throwable ignore) {
+                }
+            }
+            v.evaluateJavascript(
+                    "JSON.stringify({ct:(document.contentType||''),"
+                            + "body:((document.body && document.body.innerText) || 'EMPTY')})",
+                    value -> {
+                        w30Outcome.set("finished " + brief(value));
+                        if (w30Latch != null) w30Latch.countDown();
+                    });
+        }
+
+        @Override
+        public void onReceivedError(WebView v, WebResourceRequest r, WebResourceError e) {
+            w30Outcome.set("error code=" + e.getErrorCode() + " desc=" + e.getDescription());
+            if (w30Latch != null) w30Latch.countDown();
+        }
+    }
+
+    private static String mimeFor(String path) {
+        String ext = MimeTypeMap.getFileExtensionFromUrl(path.toLowerCase());
+        String m = (ext == null || ext.isEmpty()) ? null
+                : MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext);
+        if (m == null) m = URLConnection.guessContentTypeFromName(path);
+        return m != null ? m : "application/octet-stream";
+    }
+
+    private void runW30(final File f, final Next next) {
+        if (f == null) {
+            rec("W30 skip: 文件没准备好");
+            next.run();
+            return;
+        }
+
+        // 1) 应用侧 client（模拟 Via：只接管 css，其余返回 null）
+        WebViewClient app = new WebViewClient() {
+            @Override
+            public WebResourceResponse shouldInterceptRequest(WebView v, WebResourceRequest r) {
+                w30AppCalls++;
+                return null;
+            }
+        };
+        wv.setWebViewClient(app);
+        rec("W30 应用 client 已设置（模拟 Via）");
+
+        // 2) 容器侧：反射找 WebViewClient 类型字段并包装
+        java.lang.reflect.Field target = null;
+        for (java.lang.reflect.Field fd : WebView.class.getDeclaredFields()) {
+            if (WebViewClient.class.isAssignableFrom(fd.getType())) {
+                target = fd;
+                break;
+            }
+        }
+        if (target == null) {
+            rec("W30 FAIL: WebView 里找不到 WebViewClient 类型字段");
+            next.run();
+            return;
+        }
+        try {
+            target.setAccessible(true);
+            WebViewClient cur = (WebViewClient) target.get(wv);
+            rec("W30 字段名=" + target.getName()
+                    + " 当前值=" + (cur == null ? "null" : cur.getClass().getName()));
+            target.set(wv, new MimeFixClient(cur));
+            rec("W30 已包装，开始加载");
+        } catch (Throwable t) {
+            rec("W30 FAIL: 反射包装失败 " + t.getClass().getSimpleName() + ": " + t.getMessage());
+            next.run();
+            return;
+        }
+
+        // 3) 加载同一个沙箱 URL
+        w30Latch = new CountDownLatch(1);
+        w30Outcome.set("timeout(8s)");
+        final String url = "file://" + f.getAbsolutePath();
+        try {
+            wv.loadUrl(url);
+        } catch (Throwable t) {
+            w30Outcome.set("load threw " + t.getClass().getSimpleName());
+            w30Latch.countDown();
+        }
+        final long deadline = System.currentTimeMillis() + 8000;
+        final Runnable[] poll = new Runnable[1];
+        poll[0] = () -> {
+            if (w30Latch.getCount() == 0) {
+                rec("W30 url=" + url + " -> " + w30Outcome.get()
+                        + "  [应用 client 被调用 " + w30AppCalls + " 次]");
+                main.post(next::run);
+            } else if (System.currentTimeMillis() > deadline) {
+                rec("W30 url=" + url + " -> timeout(8s)  [应用 client 被调用 " + w30AppCalls + " 次]");
                 main.post(next::run);
             } else {
                 main.postDelayed(poll[0], 200);
