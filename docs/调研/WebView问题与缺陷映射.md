@@ -5,6 +5,23 @@
 
 ---
 
+> ## 更正声明（2026-11-24 晚）
+>
+> **本文的 D1（Android 11+ file:// 限制）和 D2（renderer isolated uid 读不到沙箱）两条描述已被推翻。**
+>
+> 决定性反证：**Via 在容器外正常**。如果 renderer 真读不到 guest 私有目录，
+> 标准环境的 file:// 主页也应该失败 —— 但它正常。所以：
+>
+> 1. **file:// 的读取者是 browser 进程（= guest 进程），不是 renderer**
+>    Chromium 的 FileURLLoaderFactory 在 browser 进程里，renderer 只负责解析/渲染。
+> 2. **Android 11+ 的限制不是主因** —— Via 作为浏览器必然设了 allowFileAccess=true 或用了别的加载方式
+> 3. **容器内读不到 = 容器没开放/破坏了正规读取方式**，不是平台限制
+>
+> 详见 更正-WebView读取路径不是平台限制.md。
+> 下面的 D1/D2 表格保留作为"曾经的错误判断"记录，**不要作为结论引用**。
+
+---
+
 ## 零、一句话
 
 > **WebView 相关问题分散在 4 个不同类别里，不能当成一个问题看：**
