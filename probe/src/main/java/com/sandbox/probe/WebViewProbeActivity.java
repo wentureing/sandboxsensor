@@ -973,7 +973,7 @@ public class WebViewProbeActivity extends Activity {
                 if (stream != null) {
                     try {
                         rec("W34 getMimeType(沙箱 html stream) = "
-                                + getMime.call(null, stream, sandboxUrl));
+                                + getMime.invoke(null, stream, sandboxUrl));
                     } catch (Throwable t) {
                         rec("W34 getMimeType 沙箱 FAIL: " + t.getClass().getSimpleName()
                                 + ": " + t.getMessage());
@@ -993,7 +993,7 @@ public class WebViewProbeActivity extends Activity {
                     : (tstream == null ? "null" : tstream.getClass().getName())));
             if (tstream != null) {
                 try {
-                    rec("W34 getMimeType(tmp stream) = " + getMime.call(null, tstream, tmpUrl));
+                    rec("W34 getMimeType(tmp stream) = " + getMime.invoke(null, tstream, tmpUrl));
                 } catch (Throwable t) {
                     rec("W34 getMimeType tmp FAIL: " + t.getClass().getSimpleName()
                             + ": " + t.getMessage());
