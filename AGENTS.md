@@ -429,7 +429,27 @@ node tools/lint/kotlin-lint.mjs <改动的目录或文件>
 
 # 拆分/迁移代码后**必跑**：源文件的 private 成员有没有被新文件引用
 node tools/lint/kotlin-lint.mjs --deps <源文件> <引用它的新文件>
+
+# 移包/迁移后**必跑**：同模块跨包引用是否漏了 import（要传整个模块 src 目录）
+node tools/lint/check-imports.mjs <模块 src 目录>
+
+# 新增/修改 hook 入口时（提示模式，不阻塞）
+node tools/lint/check-hook-idempotent.mjs <目录>
 ```
+
+### 为什么需要 `check-imports`（真实教训）
+
+本项目连续两次因"移包/迁移后漏 import"让 CI 失败：
+
+| 次 | 场景 | 缺失 | 耗时 |
+| --- | --- | --- | --- |
+| 1 | 迁移 `CustomerProbes` | `import com.nextvm.core.common.findField` | 1 轮 CI（2 分钟） |
+| 2 | 移包 `LegacyMessageHandlers` | `import ...engine.ActivityThreadHook` | 1 轮 CI（2 分钟） |
+
+`check-imports.mjs` 把这类错误提前到**毫秒级**：建立"类型名 → 包"表，
+找出"引用了别包类型但既没 import、也不在嵌套访问里"的地方。
+
+已知误报：嵌套类访问（`Outer.Inner`）、全限定写法 —— 已在规则里排除，仍有少量需人工判断。
 
 退出码 0 = 通过。**两个命令都在毫秒级**，不需要 Gradle / Android SDK。
 
