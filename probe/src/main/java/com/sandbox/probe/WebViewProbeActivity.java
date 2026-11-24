@@ -113,7 +113,7 @@ public class WebViewProbeActivity extends Activity {
         status = new TextView(this);
         status.setTextSize(13);
         status.setPadding(12, 12, 12, 6);
-        status.setText("WebViewProbe v1.21 —— 打开即自动跑全部 W 实验，结果实时显示在下方");
+        status.setText("WebViewProbe v1.22 —— 打开即自动跑全部 W 实验，结果实时显示在下方");
         root.addView(status, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
@@ -293,6 +293,8 @@ public class WebViewProbeActivity extends Activity {
         probeDataDir(ff1 == null ? null : ff1.getAbsolutePath());
         // v1.21：假 dataDir 是否生效 + Java 层能否用它读文件（v139 的两个判据）
         probeDataDirUsability();
+        // v1.22：Java 层文件 I/O 重定向（容器 v141 RegisterNatives）是否生效
+        probeJavaIoRedirect();
         // v1.16：直接问 WebView 内部的 AndroidProtocolHandler，把「W2 为什么 text/plain」定死
         probeProtocolHandler(ff1);
         // W16 用 .txt 扩展名（内容仍是 HTML），测"是否只看扩展名"
@@ -1222,6 +1224,54 @@ public class WebViewProbeActivity extends Activity {
             }
         } catch (Throwable t) {
             rec("W37 FAIL: " + t.getClass().getSimpleName() + ": " + t.getMessage());
+        }
+    }
+
+    /**
+     * W38：Java 层文件 I/O 重定向是否生效（容器 v141 的验收点）。
+     *
+     * 容器侧用 RegisterNatives 替换了 `libcore.io.Linux.open/access`，
+     * 让 Java 层的 File/FileInputStream 也走路径重定向。判据：
+     *
+     *   容器 translate=false（空转，默认）：写 /sdcard 仍 EPERM，
+     *       但 `logcat -s NextVM-Native` 里应出现 `JavaIo open[nofix]: /sdcard/...`
+     *   容器 translate=true：写 /sdcard 成功（被翻译到沙箱 sdcard）
+     */
+    private void probeJavaIoRedirect() {
+        final String payload = "W38_JAVAIO_OK";
+        File f = new File("/sdcard/wvprobe_javaio.txt");
+        try {
+            FileOutputStream o = new FileOutputStream(f);
+            o.write(payload.getBytes("UTF-8"));
+            o.close();
+            rec("W38 Java 写 /sdcard OK -> " + f.getAbsolutePath());
+        } catch (Throwable t) {
+            rec("W38 Java 写 /sdcard FAIL: " + t.getClass().getSimpleName()
+                    + ": " + t.getMessage());
+        }
+        try {
+            FileInputStream i = new FileInputStream(f);
+            byte[] buf = new byte[64];
+            int n = i.read(buf);
+            i.close();
+            rec("W38 Java 读回 OK: "
+                    + (n > 0 ? new String(buf, 0, n, "UTF-8") : "<empty>"));
+        } catch (Throwable t) {
+            rec("W38 Java 读回 FAIL: " + t.getClass().getSimpleName()
+                    + ": " + t.getMessage());
+        }
+        rec("W38 Java exists(/sdcard/wvprobe_javaio.txt) = " + f.exists());
+
+        // 对照：写 getFilesDir（VirtualContext 给的沙箱路径，一直可用）
+        try {
+            File g = new File(getFilesDir(), "wvprobe_javaio_control.txt");
+            FileOutputStream o = new FileOutputStream(g);
+            o.write(payload.getBytes("UTF-8"));
+            o.close();
+            rec("W38 对照 getFilesDir 写入 OK");
+        } catch (Throwable t) {
+            rec("W38 对照 getFilesDir 写入 FAIL: " + t.getClass().getSimpleName()
+                    + ": " + t.getMessage());
         }
     }
 
