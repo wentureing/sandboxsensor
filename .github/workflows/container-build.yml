@@ -194,7 +194,11 @@ jobs:
       # P1-2：纯 JUnit 单测（零下载，秒级）。
       # 失败时**必须让 job 变红**（不再 continue-on-error）——
       # p23 曾出现「19 个用例全失败，job 仍显示绿色通过」的误判。
+      #
+      # ⚠️ 2026-11-24 临时暂停（用户授权）：WebView 调查期间需要快速迭代容器，
+      #    单测步骤在每轮构建里要花 1-2 分钟，先跳过。恢复方式：删掉 if: false。
       - name: Unit tests
+        if: false
         working-directory: container
         run: |
           set -o pipefail
