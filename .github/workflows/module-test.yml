@@ -103,11 +103,15 @@ jobs:
       - name: Cache Gradle home
         uses: actions/cache@v4
         with:
+          # path 必须与 container-build / probe-build **完全一致**。
+          # actions/cache 的 cache version = hash(path + 压缩方式)：
+          # path 不同 -> version 不同 -> 即使 key 存在也匹配不到（restore-keys 也跨不过去）。
+          # 踩过：这里原先写 `~/.gradle/wrapper`（别的 workflow 用 `~/.gradle/wrapper/dists`），
+          # 导致 restore-keys 里的 gradle-home-8.9-v2（691MB，确实存在）永远 miss。
           path: |
             ~/.gradle/caches
-            ~/.gradle/wrapper
-          # 注意：必须是 ${{ runner.os }}（表达式），不能写 ${Runner.OS}（shell 语法，
-          # 在 key 字段里不会被展开 -> 变成字面量 -> 缓存永远 miss，实测踩过）。
+            ~/.gradle/wrapper/dists
+          # key 里必须用 ${{ runner.os }} 表达式（不能写 ${Runner.OS} 这种 shell 语法）。
           key: gradle-home-${{ env.GRADLE_VERSION }}-libs-${{ hashFiles('container/gradle/libs.versions.toml') }}-${{ env.CACHE_EPOCH }}
           restore-keys: |
             gradle-home-${{ env.GRADLE_VERSION }}-libs-${{ env.CACHE_EPOCH }}-
