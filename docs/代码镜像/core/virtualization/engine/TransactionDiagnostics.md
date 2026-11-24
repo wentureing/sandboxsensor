@@ -41,3 +41,37 @@
 4. 这里只写"见证"，不要在这里做任何"基于日志内容的行为决策"（否则日志就成了逻辑的一部分，违反单一职责）。
 5. 与 v146 起的 `DebugTrace` 区别：`DebugTrace` 是**统一调试出口**（会进 `debug-trace.log`），
    这里是**针对 startActivity 链路的专用 witness 文件**，保留是因为它的格式与服务端排查脚本约定过。
+
+## 偏差登记（v158c 依据上游代码核实）
+
+### 「永不抛」是上游契约，不是 v151 抽取时新加的
+
+- **上游出处**：ActivityThreadHook.describeTransactionItem，引入于 commit `63346e6`（v76）
+- **上游实现**：整个 when 包在 `try { ... } catch (_: Throwable) { simple + " <describe failed>" }` 里
+- **v151 抽取**：逐字保持同一结构，仅把 private fun 改为 internal object 的方法
+
+### 契约的确切含义（三层保护）
+
+| 层 | catch 类型 | 效果 |
+| --- | --- | --- |
+| 内层（本文件 describe） | `Throwable` | **连 Error 都吞**，一律返回 `<describe failed>` |
+| 外层（`handleExecuteTransaction`） | `Exception` | 只吞 Exception，不吞 Error |
+| 调用点（`traceDelivery`） | 无 | 返回值只写日志，**不参与控制流** |
+
+### ⚠️ 必要偏差 / 预留隐患
+
+| # | 偏差 | 类型 | 说明 |
+| --- | --- | --- | --- |
+| 1 | `catch (_: Throwable)` 会吞 `OutOfMemoryError` / `StackOverflowError` | ⚠️ **上游遗留，暂不改** | **合理面**：纯观测代码，不能因写 trace 失败打断事务拦截（会影响 guest 启动）。**隐患面**：真正的 OOM 会被静默吞掉。**可观测**：日志出现 `<describe failed>` 即说明发生了降级。若要改，应改为 `catch (e: Exception)` 让 Error 上抛 —— 但那会改变上游行为，属于"必要偏差"决策，需另开变更 |
+| 2 | 泛型擦除导致 `List<String>` 通过 `as? List<Intent>` | 🟡 中性 | 随后在 lambda 里抛 `ClassCastException`，被内层 catch 吞掉 → 输出 `<describe failed>`。行为可接受（仍是"不抛"），但"降级"与"字段缺失"在日志里长得一样，排查时需注意区分 |
+
+### 测试与契约的对应
+
+`TransactionItemDescriberTest` 的 7 个用例逐一钉住上表：
+
+| 用例 | 钉住的行为 |
+| --- | --- |
+| 字段缺失 | 正常降级（`cmp=null`），**不是** `<describe failed>` |
+| 字段类型不符（泛型擦除） | `<describe failed>` |
+| 空类名 | 返回空串（不抛） |
+| 未知 item | 返回简单类名 |
