@@ -40,6 +40,32 @@
 | `nativeGetRecent()` | `…_nativeGetRecent` |
 | `nativeClearRecent()` | `…_nativeClearRecent` |
 
+## 偏差登记
+
+| # | 偏差 | 相对谁 | 类型 | 理由 / 待办 |
+| --- | --- | --- | --- | --- |
+| **1** | 整个 hook 都是**重写** `libcore.io.Linux.open/access` | AOSP 原实现 | ⚠️ **无法消除的偏差** | **已实测**：`libjavacore.so` 的 dynsym 里**没有** `Linux_open`/`Linux_access`（它们是 static 函数、经 `RegisterNatives` 注册）→ **拿不到原实现指针 → 无法透传 → 不存在零偏差方案** |
+| **2** | 失败时抛 `ErrnoException` 而非 `FileNotFoundException` | v141 旧实现 | ✅ 已修正 | v148 对齐 AOSP（减少偏差），但**不追求"完全等价"** —— 因为前提（拿原实现）不成立 |
+| **3** | `access` 失败抛异常而非返回 false | v141 旧实现 | ✅ 已修正 | 同上 |
+| **4** | EINTR 重试 | v141 旧实现 | ✅ 已修正 | 同上 |
+| **5** | 路径命中重定向规则时改写目标 | AOSP | ✅ **必要偏差** | 这是 hook 存在的唯一理由 |
+
+## 以容器为中心的结论（重要）
+
+> **容器的第一原则是不破坏 guest 可用性；能力缺失可以接受，破坏应用不可接受。**
+
+| 层 | 偏差 | 覆盖面 | 评价 |
+| --- | --- | --- | --- |
+| `VirtualContext` 路径改写 | **0** | 所有"通过 Context 拿路径"的代码（~90% 场景） | ✅ 主力机制 |
+| native GOT patch | 小 | 被 patch 的 so 里的 libc 调用 | ✅ 有效 |
+| **本类（Java IO hook）** | **必然有**（重写 boot classpath 方法） | 仅"Java 硬编码路径"（`new File("/sdcard/x")`） | ❌ **收益 < 代价** |
+
+**因此**：
+1. **默认关闭**（`DebugFlags.isOn(JAVA_IO, false)`）；
+2. **不再以"对齐 AOSP"为目标打磨它** —— 前提不成立，投入无回报；
+3. 需要覆盖硬编码路径时，优先考虑 native 层（GOT patch）或其他注入点；
+4. 真实应用回归（Via 可交互）**未通过前不得改默认值**。
+
 ## 约束与坑
 
 1. **语义必须与 AOSP 等价**（v148 的教训）
