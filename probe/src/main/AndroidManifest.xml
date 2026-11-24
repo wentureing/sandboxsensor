@@ -58,18 +58,21 @@
         <!--
           WebViewProbeActivity（v1.9+）：用实践证明 WebView 在容器里的行为。
 
-          W0  WebView 能否创建            -> WebView 自己的资源域（0x02）能否解析
-          W1  loadDataWithBaseURL         -> 渲染（不碰文件）
-          W2  file:// + getFilesDir()     -> file:// 读私有目录
-          W3  file:///android_asset/      -> assets（AssetManager 路径）
-          W4  file:// + getDataDir/files  -> dataDir 形式
-          W5  ApplicationInfo.getAllApkPaths()  -> AOSP WebViewFactory 用它加 shared library
-          W6  宿主 getAssets() 里有没有 WebView 资源 -> 验证 addAssetPathAsSharedLibrary 是否生效
-          W7  0x02 域资源能否解析         -> 直接验 popup 崩溃那个 0x20c0006
+          W0  WebView 能否创建            WebView 自己的资源域（0x02）能否解析
+          W1  loadDataWithBaseURL         渲染（不碰文件）
+          W2  file 协议 + getFilesDir()   读私有目录
+          W3  file 协议的 android_asset   assets（AssetManager 路径）
+          W4  file 协议 + getDataDir/files  dataDir 形式
+          W5  ApplicationInfo.getAllApkPaths()  AOSP WebViewFactory 用它加 shared library
+          W6  宿主 getAssets() 里有没有 WebView 资源  验证 addAssetPathAsSharedLibrary 是否生效
+          W7  0x02 域资源能否解析         直接验 popup 崩溃那个 0x20c0006
 
           不设 LAUNCHER（避免抢 UiTestActivity 的入口），用 CmdReceiver 的
-          LAUNCH_ACTIVITY --es activity com.sandbox.probe.WebViewProbeActivity 启动。
+          LAUNCH_ACTIVITY 命令（带 es activity 参数）启动。
           同样用 NoActionBar 主题，避免容器里 setDefaultIcon 去 guest Resources 查 0x7f 图标。
+
+          注意：XML 注释里不能出现双连字符（XML 规范），所以上面用中文描述代替了
+          命令行参数写法，也不要写三个点之类的路径通配。
         -->
         <activity
             android:name=".WebViewProbeActivity"
