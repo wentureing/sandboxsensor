@@ -22,7 +22,7 @@
 | `VirtualContext` 路径改写（26 个 override） | ✅ 生效 | 探针 W36：`getFilesDir()` 返回沙箱真路径 |
 | native GOT/PLT patch（被 patch 的 so） | ✅ 生效 | 架构文档 + `NS_HOOK_SYSTEM_LIBS=0` 日志 |
 | **路径重定向规则（guest 进程）** | ✅ **v142 起生效** | 之前 `rules=0`（规则只在主进程注册） |
-| **Java 层文件 I/O 重定向** | ✅ **已打通（v141+v142）** | `RegisterNatives` 替换 `libcore.io.Linux.open/access` + guest 进程补注册 11 条规则；W38 写 `/sdcard` 成功且文件落在沙箱，详见 `../输出/记录/记录-Java层路径重定向打通.md` |
+| **Java 层文件 I/O 重定向（v141）** | ⚠️ **已实现但默认关闭** | `RegisterNatives` 替换 `libcore.io.Linux.open/access` 能装上（W38 曾通过），但会让 Via **完全不能交互**（用户对照确认）。根因是异常语义与 AOSP 不一致，详见 `../输出/记录/记录-JavaIoHook导致Via不可交互.md`。开关：`debug.nextvm.javaIo`（默认 0） |
 | `/proc/self` spoof、进程名、seccomp | ✅ 生效 | `ensureGuestApplicationBooted`（guest） |
 | `WebViewWarmup`（provider 预热/修复） | ✅ 生效 | guest bind complete 时调度 |
 | v138 进程 Application → guest | ✅ 生效 | 探针 W32：`currentApplication()` 的 class 是 `ProbeApplication` |
