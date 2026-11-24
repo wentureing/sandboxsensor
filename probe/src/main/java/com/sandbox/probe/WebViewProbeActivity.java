@@ -113,7 +113,7 @@ public class WebViewProbeActivity extends Activity {
         status = new TextView(this);
         status.setTextSize(13);
         status.setPadding(12, 12, 12, 6);
-        status.setText("WebViewProbe v1.15 —— 打开即自动跑全部 W 实验，结果实时显示在下方");
+        status.setText("WebViewProbe v1.16 —— 打开即自动跑全部 W 实验，结果实时显示在下方");
         root.addView(status, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
@@ -289,6 +289,8 @@ public class WebViewProbeActivity extends Activity {
         // 3) 串联加载实验
         final File ff1 = f1;
         final File ff4 = f4;
+        // v1.16：直接问 WebView 内部的 AndroidProtocolHandler，把「W2 为什么 text/plain」定死
+        probeProtocolHandler(ff1);
         // W16 用 .txt 扩展名（内容仍是 HTML），测"是否只看扩展名"
         final File ffTxt = prepareFile("wvprobe_txt.txt", HTML_BODY);
 
@@ -921,6 +923,85 @@ public class WebViewProbeActivity extends Activity {
             }
         };
         main.postDelayed(poll[0], 200);
+    }
+
+    /**
+     * W34：直接反射调用 WebView 内部 `org.chromium.android_webview.AndroidProtocolHandler`
+     * 的 `open(url)` 与 `getMimeType(stream, url)`。
+     *
+     * 背景（反汇编得到的事实）：
+     *   open(url) 只处理 file 的 asset/resource 前缀与 content，**普通 file 路径返回 null**；
+     *   getMimeType 的分支是：content → resolver；file 且 startsWith(assetPath) → 按名字；
+     *   **其余 → guessContentTypeFromStream（内容嗅探）**。
+     *
+     * 所以只要 open(沙箱 html) 返回 null，Java 侧就根本没参与，W2 的 text/plain 只能来自 native；
+     * 反之若返回流，说明 assetPath 常量匹配了沙箱路径 —— 两种情况的修法完全不同。
+     */
+    private void probeProtocolHandler(File sandboxFile) {
+        String sandboxUrl = sandboxFile == null ? null : "file://" + sandboxFile.getAbsolutePath();
+        String tmpUrl = "file:///data/local/tmp/wvprobe_tmp.html";
+        try {
+            Class<?> factory = Class.forName("android.webkit.WebViewFactory");
+            Method gp = factory.getDeclaredMethod("getProviderClass");
+            gp.setAccessible(true);
+            Class<?> providerClass = (Class<?>) gp.invoke(null);
+            if (providerClass == null) {
+                rec("W34 skip: providerClass=null");
+                return;
+            }
+            ClassLoader cl = providerClass.getClassLoader();
+            Class<?> aph = Class.forName(
+                    "org.chromium.android_webview.AndroidProtocolHandler", false, cl);
+            rec("W34 class = " + aph.getName());
+
+            Method open = aph.getDeclaredMethod("open", String.class);
+            open.setAccessible(true);
+            Method getMime = aph.getDeclaredMethod("getMimeType", InputStream.class, String.class);
+            getMime.setAccessible(true);
+
+            if (sandboxUrl != null) {
+                Object stream = null;
+                String openErr = null;
+                try {
+                    stream = open.invoke(null, sandboxUrl);
+                } catch (Throwable t) {
+                    openErr = t.getClass().getSimpleName() + ": " + t.getMessage();
+                }
+                rec("W34 open(沙箱 html) = "
+                        + (openErr != null ? "THREW " + openErr
+                        : (stream == null ? "null" : stream.getClass().getName())));
+                if (stream != null) {
+                    try {
+                        rec("W34 getMimeType(沙箱 html stream) = "
+                                + getMime.call(null, stream, sandboxUrl));
+                    } catch (Throwable t) {
+                        rec("W34 getMimeType 沙箱 FAIL: " + t.getClass().getSimpleName()
+                                + ": " + t.getMessage());
+                    }
+                }
+            }
+
+            Object tstream = null;
+            String tErr = null;
+            try {
+                tstream = open.invoke(null, tmpUrl);
+            } catch (Throwable t) {
+                tErr = t.getClass().getSimpleName() + ": " + t.getMessage();
+            }
+            rec("W34 open(/data/local/tmp html) = "
+                    + (tErr != null ? "THREW " + tErr
+                    : (tstream == null ? "null" : tstream.getClass().getName())));
+            if (tstream != null) {
+                try {
+                    rec("W34 getMimeType(tmp stream) = " + getMime.call(null, tstream, tmpUrl));
+                } catch (Throwable t) {
+                    rec("W34 getMimeType tmp FAIL: " + t.getClass().getSimpleName()
+                            + ": " + t.getMessage());
+                }
+            }
+        } catch (Throwable t) {
+            rec("W34 FAIL: " + t.getClass().getSimpleName() + ": " + t.getMessage());
+        }
     }
 
     private static String brief(String s) {
