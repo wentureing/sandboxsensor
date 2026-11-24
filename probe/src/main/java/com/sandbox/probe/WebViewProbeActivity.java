@@ -113,7 +113,7 @@ public class WebViewProbeActivity extends Activity {
         status = new TextView(this);
         status.setTextSize(13);
         status.setPadding(12, 12, 12, 6);
-        status.setText("WebViewProbe v1.16 —— 打开即自动跑全部 W 实验，结果实时显示在下方");
+        status.setText("WebViewProbe v1.17 —— 打开即自动跑全部 W 实验，结果实时显示在下方");
         root.addView(status, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
@@ -954,8 +954,38 @@ public class WebViewProbeActivity extends Activity {
                     "org.chromium.android_webview.AndroidProtocolHandler", false, cl);
             rec("W34 class = " + aph.getName());
 
-            Method open = aph.getDeclaredMethod("open", String.class);
-            open.setAccessible(true);
+            // v1.17：先把真实方法列表打出来 —— 设备上跑的那份 dex 与离线反汇编的签名不一致
+            // （v1.16 报 NoSuchMethodException: open(String)）
+            try {
+                for (Method m : aph.getDeclaredMethods()) {
+                    StringBuilder sb = new StringBuilder("W34   m: " + m.getName() + "(");
+                    Class<?>[] ps = m.getParameterTypes();
+                    for (int i = 0; i < ps.length; i++) {
+                        if (i > 0) sb.append(", ");
+                        sb.append(ps[i].getSimpleName());
+                    }
+                    sb.append(") -> ").append(m.getReturnType().getSimpleName());
+                    sb.append((m.getModifiers() & java.lang.reflect.Modifier.STATIC) != 0
+                            ? " [static]" : "");
+                    rec(sb.toString());
+                }
+            } catch (Throwable t) {
+                rec("W34 list methods FAIL: " + t.getClass().getSimpleName());
+            }
+
+            Method open = null;
+            try {
+                open = aph.getDeclaredMethod("open", String.class);
+            } catch (NoSuchMethodException e) {
+                rec("W34 open(String) 不存在，尝试 open(Context, String)");
+                try {
+                    open = aph.getDeclaredMethod(
+                            "open", Context.class, String.class);
+                } catch (NoSuchMethodException e2) {
+                    rec("W34 open 的两种签名都不存在");
+                }
+            }
+            if (open != null) open.setAccessible(true);
             Method getMime = aph.getDeclaredMethod("getMimeType", InputStream.class, String.class);
             getMime.setAccessible(true);
 
