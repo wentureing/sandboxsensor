@@ -1,7 +1,7 @@
 # 方向 A 可行性：让运行期 `System.loadLibrary` 加载的库也能被 patch
 
 - 日期：2026-11-23
-- 起因：P28 实测发现 `libprobe.so` 的 GOT 完全没被 patch（见 `记录-P28实测推翻越权修复前提.md`）
+- 起因：P28 实测发现 `libprobe.so` 的 GOT 完全没被 patch（见 `记录-P28与权限传导-完整结论.md`）
 - 结论：**可行，且改动比预想小**；但有一个必须先验证的前提
 
 ---
@@ -120,7 +120,7 @@ L82: // nullptr also means default namespace to the linker.
 ```cpp
 // native-hook.cpp 的过滤链，第 3 步附近加
 // 3.5) ART 的 native loader：必须 patch，否则 System.loadLibrary 加载的应用库
-//      拿不到 GOT patch（实测见 docs/records/记录-P28实测推翻越权修复前提.md）
+//      拿不到 GOT patch（实测见 docs/records/记录-P28与权限传导-完整结论.md）
 const bool is_native_loader = strstr(lib_name, "libnativeloader") != nullptr;
 if (is_app_lib || is_native_loader) { /* fallthrough: patch */ }
 ```

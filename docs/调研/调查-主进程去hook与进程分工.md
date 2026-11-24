@@ -41,18 +41,18 @@
 #### 1.2.1 代码结构
 
 ```kotlin
-// AntiDetectionEngine.kt:140
+/ AntiDetectionEngine.kt:140
 fun initialize() {
     if (initialized) return
     initialized = true
-    Timber.tag(TAG).i("AntiDetectionEngine initialized — anti-detection ready")   // ← 只打日志
+    Timber.tag(TAG).i("AntiDetectionEngine initialized — anti-detection ready")   / ← 只打日志
 }
 
-// AntiDetectionEngine.kt:161 —— 真正干活的方法
+/ AntiDetectionEngine.kt:161 —— 真正干活的方法
 fun enableAntiDetection(instanceId: String, level: DetectionLevel = DetectionLevel.MODERATE) {
     instanceLevels[instanceId] = level
-    hookRootChecks()          // ← 19 处 hidePath 都从这里来（L167）
-    hookEmulatorChecks()      // L168
+    hookRootChecks()          / ← 19 处 hidePath 都从这里来（L167）
+    hookEmulatorChecks()      / L168
     if (level >= DetectionLevel.MODERATE) { hookVirtualEnvChecks(); hookXposedChecks() }
     if (level >= DetectionLevel.AGGRESSIVE) { hookStackTraceCleanup() }
 }
@@ -120,7 +120,7 @@ fun enableAntiDetection(instanceId: String, level: DetectionLevel = DetectionLev
 ### 1.3 已存在的进程判断能力（可复用）
 
 ```kotlin
-// PackageManagerProxy.kt —— 已在用 7 次
+/ PackageManagerProxy.kt —— 已在用 7 次
 callerResolver.isGuestProcess()
 ```
 
@@ -147,14 +147,14 @@ CmdReceiver.onReceive（主进程主线程）
 #### 方式 A：`CmdReceiver` 转发到 guest 进程的 stub Service
 
 ```kotlin
-// 主进程 CmdReceiver（不装 hook）
+/ 主进程 CmdReceiver（不装 hook）
 ACTION_TEST -> {
     val intent = Intent().apply {
-        setClassName(context.packageName, "com.nextvm.app.stub.P0\$S00")   // :p0 进程
+        setClassName(context.packageName, "com.nextvm.app.stub.P0\$S00")   / :p0 进程
         putExtra("test", testName)
         putExtra("args", args)
     }
-    context.startService(intent)      // 跨进程
+    context.startService(intent)      / 跨进程
 }
 ```
 
@@ -212,7 +212,7 @@ ACTION_TEST -> {
 ### 3.2 代读的本质需求
 
 ```
-WebView 的 renderer（isolated 进程）请求 file:///sdcard/x.html
+WebView 的 renderer（isolated 进程）请求 file://sdcard/x.html
   → 容器需要：读到 /sdcard/x.html 的真实内容
     → 包成 WebResourceResponse 返回
 ```

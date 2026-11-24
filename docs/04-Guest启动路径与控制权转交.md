@@ -67,7 +67,7 @@ Launcher/通知/URL
 ### 路线 A：替换 `ActivityThread.mInstrumentation`（NestSpace）
 
 ```
-ContainerSessions.kt:118        →  threadClass.getDeclaredField("mInstrumentation")   // 反射替换
+ContainerSessions.kt:118        →  threadClass.getDeclaredField("mInstrumentation")   / 反射替换
 ContainerHostInstrumentation.kt →  override fun newActivity(cl, className, intent)
                                     ├─ Class.forName(className, false, cl)
                                     ├─ 判断是不是宿主 StageAActivity
@@ -91,8 +91,8 @@ StageAActivity.kt:55            →  manifest 里预注册的占位 Activity
 ActivityThreadHook.kt:23   →  "EXECUTE_TRANSACTION = 159 (Android 9+): ALL activity lifecycle goes through this"
 ActivityThreadHook.kt:340  →  1. Swap ActivityInfo.name + applicationInfo to guest app
                               2. Replace ClassLoader via LoadedApk so performLaunchActivity() uses DexClassLoader
-ActivityThreadHook.kt:422  →  nameField?.set(activityInfo, targetActivity)     // ActivityInfo.name → guest 类名
-ActivityThreadHook.kt:427  →  aiPkgField?.set(activityInfo, targetPackage)     // ActivityInfo.packageName → guest 包名
+ActivityThreadHook.kt:422  →  nameField?.set(activityInfo, targetActivity)     / ActivityInfo.name → guest 类名
+ActivityThreadHook.kt:427  →  aiPkgField?.set(activityInfo, targetPackage)     / ActivityInfo.packageName → guest 包名
 ```
 
 对比：

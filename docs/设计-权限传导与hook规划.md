@@ -1,7 +1,7 @@
 # 设计：权限传导的配置策略 + hook/豁免规划
 
 - 日期：2026-11-23
-- 依据：P28 三方对比（`记录-Android12三方对比-P28.md`）+ AOSP 源码验证（`记录-方向A可行性-native-loader-hook断点.md`）
+- 依据：P28 三方对比（`记录-P28与权限传导-完整结论.md`）+ AOSP 源码验证（`调研/记录-方向A可行性-native-loader-hook断点.md`）
 - 两份内容：**① 怎么让权限"不轻易传导"** ② **基于 AOSP 的 hook 与豁免规划**
 
 ---
@@ -63,10 +63,10 @@
 **① 导入口径改为 SAF，不靠全局权限**
 
 ```kotlin
-// 之前（依赖 MANAGE_EXTERNAL_STORAGE）
+/ 之前（依赖 MANAGE_EXTERNAL_STORAGE）
 val apkFile = File("/sdcard/Download/x.apk")
 
-// 之后（SAF：只拿一个 fd，不影响其他 guest）
+/ 之后（SAF：只拿一个 fd，不影响其他 guest）
 val uri = /* ACTION_OPEN_DOCUMENT 返回的 */ uri
 contentResolver.openInputStream(uri)?.use { ins ->
     val tmp = File(cacheDir, "import.apk")
@@ -80,13 +80,13 @@ contentResolver.openInputStream(uri)?.use { ins ->
 **② 需要整盘访问时，做成"临时 + 可撤销"**
 
 ```kotlin
-// 只在用户点"导入整个文件夹"时申请
+/ 只在用户点"导入整个文件夹"时申请
 fun requestAllFilesAccess(activity: Activity) {
     val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
         Uri.parse("package:${activity.packageName}"))
     activity.startActivity(intent)
 }
-// 用完（比如导入完成）后提示用户撤销，或记录"上次使用时间"定期提醒
+/ 用完（比如导入完成）后提示用户撤销，或记录"上次使用时间"定期提醒
 ```
 
 **③ 权限使用要留痕（哪个 guest 用过什么）**

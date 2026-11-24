@@ -41,24 +41,24 @@ guest 启动后 `RenderThread` 崩溃，栈顶在 GPU 驱动里：
 
 ```cpp
 if (lib_name != nullptr) {
-    // 1) 容器自身：永不 patch
-    //    容器的路径重定向本身依赖真实的 open/stat/fopen，
-    //    一旦被自己拦截，宿主 IO 会被错误改写
+    / 1) 容器自身：永不 patch
+    /    容器的路径重定向本身依赖真实的 open/stat/fopen，
+    /    一旦被自己拦截，宿主 IO 会被错误改写
     if (strstr(lib_name, "com.nextvm.app") || strstr(lib_name, "libnextvm")) return;
 
-    // 2) 图形栈：永不 patch
-    //    实测 patch 后驱动编译 shader 时拿不到正确缓存/属性 → abort
+    / 2) 图形栈：永不 patch
+    /    实测 patch 后驱动编译 shader 时拿不到正确缓存/属性 → abort
     if (libGLES || libEGL || eglSubDriver || libvulkan || vulkan.adreno || libllvm-glnext) return;
 
-    // 3) 应用/沙箱库：始终 patch
+    / 3) 应用/沙箱库：始终 patch
     if (/data/app/ || /data/user/ || /virtual/) { /* fallthrough */ }
 
-    // 4) 其余系统库：由 NS_HOOK_SYSTEM_LIBS 决定（默认 0 = 不 patch）
+    / 4) 其余系统库：由 NS_HOOK_SYSTEM_LIBS 决定（默认 0 = 不 patch）
     else {
 #if NS_HOOK_SYSTEM_LIBS
         /* patch */
 #else
-        return;   // "GOT patch skipped (system lib, NS_HOOK_SYSTEM_LIBS=0)"
+        return;   / "GOT patch skipped (system lib, NS_HOOK_SYSTEM_LIBS=0)"
 #endif
     }
 }
@@ -110,9 +110,9 @@ static bool caller_is_guest(void* return_address) {
     Dl_info info;
     if (dladdr(return_address, &info) == 0) return false;
     const char* p = info.dli_fname;
-    // 容器自己的库 → false
+    / 容器自己的库 → false
     if (strstr(p, "com.nextvm.app") || strstr(p, "libnextvm")) return false;
-    // 应用/沙箱库 → true
+    / 应用/沙箱库 → true
     return strstr(p, "/data/app/") || strstr(p, "/data/user/") || strstr(p, "/virtual/");
 }
 ```
@@ -138,9 +138,9 @@ static bool is_import_read_exempt(const char* path) {
            strncmp(path, "/data/local/tmp/", 17) == 0;
 }
 
-// hooked_open / hooked_openat 里：
+/ hooked_open / hooked_openat 里：
 if ((flags & O_ACCMODE) == O_RDONLY && is_import_read_exempt(path)) {
-    return real_open(path, flags);     // 不重定向
+    return real_open(path, flags);     / 不重定向
 }
 ```
 
@@ -163,7 +163,7 @@ p13 把系统库整体排除，是为了修 GPU 崩溃 —— **这个决定本�
 
 **教训**：
 1. 粗粒度的"全有/全无"开关，其**副作用不会立刻显现**
-2. 需要**探针覆盖**才能发现（这也是 `计划-提升路线图.md` 里 P1-1 自检的动机）
+2. 需要**探针覆盖**才能发现（这也是 `计划/README.md` 里 P1-1 自检的动机）
 
 ---
 

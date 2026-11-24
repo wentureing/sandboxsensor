@@ -24,10 +24,10 @@
 每个槽有 5 类组件（`Standard` ×5 + `SingleTop` ×2 + `SingleTask` ×2 + `SingleInstance` ×1 + `Service` ×5 + `Provider` ×3 + `Receiver` ×2）。
 
 ```kotlin
-// VirtualMultiProcessManager.kt:49
+/ VirtualMultiProcessManager.kt:49
 const val MAX_PROCESS_SLOTS = 10
-// L78
-private val slotAllocation = ConcurrentHashMap<Int, String>()   // slot -> "instanceId:processName"
+/ L78
+private val slotAllocation = ConcurrentHashMap<Int, String>()   / slot -> "instanceId:processName"
 ```
 
 **所以**：
@@ -133,10 +133,10 @@ guest 进程内调用 open("/sdcard/x")
 **实现**：`is_app_lib` 加上 `g_spoofed_package_name` 的过滤：
 
 ```cpp
-// 现状：只看路径前缀
+/ 现状：只看路径前缀
 if (strstr(lib_name, "/data/app/") != nullptr) return true;
 
-// 建议：还要看包名匹配
+/ 建议：还要看包名匹配
 if (strstr(lib_name, "/data/app/") != nullptr) {
     return strstr(lib_name, g_spoofed_package_name.c_str()) != nullptr;
 }
@@ -206,7 +206,7 @@ if (strstr(lib_name, "/data/app/") != nullptr) {
 
 ### 选型 3：L2 native 路径重定向
 
-三条子路线，详见 `计划-提升路线图.md` §0.5：
+三条子路线，详见 `计划/README.md` §0.5：
 
 | 子路线 | 机制 | 覆盖 | 波及 | 过滤难度 | 风险 | 工作量 |
 | --- | --- | --- | --- | --- | --- | --- |

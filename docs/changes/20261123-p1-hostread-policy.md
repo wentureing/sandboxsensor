@@ -1,7 +1,7 @@
 # P1-2：HostReadPolicy + Robolectric 单测
 
 - 日期：2026-11-23
-- 依据：`docs/计划-提升路线图.md` 的 P1-2
+- 依据：`docs/计划/README.md` 的 P1-2
 - 当前基线：容器 `a7650f2`（P0 已完成，p20 构建成功）
 
 ---

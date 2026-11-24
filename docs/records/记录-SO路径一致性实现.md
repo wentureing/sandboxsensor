@@ -96,14 +96,14 @@ P1  execve（如果 guest 要执行沙箱内的可执行文件）
 
 ```c
 static const char* translate(const char* vpath) {
-    // 返回线程局部缓冲里的实路径；未命中返回 vpath 原样
+    / 返回线程局部缓冲里的实路径；未命中返回 vpath 原样
     if (starts_with(vpath, g_virt_data_prefix)) {
         snprintf(tls_buf, sizeof(tls_buf), "%s%s",
                  g_real_data_prefix,
                  vpath + strlen(g_virt_data_prefix));
         return tls_buf;
     }
-    // ... 其他前缀
+    / ... 其他前缀
     return vpath;
 }
 ```
@@ -137,9 +137,9 @@ static const char* translate(const char* vpath) {
 ### 实现路径
 
 ```c
-// 只在 scope 打开时生效
+/ 只在 scope 打开时生效
 int hooked_open(const char* path, int flags, ...) {
-    if (is_proc_maps(path)) {           // /proc/self/maps、/proc/<pid>/maps
+    if (is_proc_maps(path)) {           / /proc/self/maps、/proc/<pid>/maps
         return make_faked_maps_fd();
     }
     ...
@@ -228,7 +228,7 @@ int hooked_open(const char* path, int flags, ...) {
 int fd = syscall(SYS_memfd_create, "lib", 0);
 write(fd, elf_buf, elf.size);
 sprintf(load_path, "/proc/self/fd/%d", fd);
-System.load(load_path);           // 失败
+System.load(load_path);           / 失败
 ```
 
 ```
@@ -274,7 +274,7 @@ guest 看到的：  /data/user/0/<guest_pkg>/lib/arm64/libx.so
 新增两项探针，直接在容器里跑：
 
 ```java
-// J37: 用"虚拟路径"加载 SO，验证 open hook 是否被 linker 走到
+/ J37: 用"虚拟路径"加载 SO，验证 open hook 是否被 linker 走到
 try {
     System.load("/data/user/0/com.example.fake/lib/arm64/libprobe.so");
     report("J37.load_virtual_path", PASS, "loaded");
@@ -282,8 +282,8 @@ try {
     report("J37.load_virtual_path", FAIL, t.toString());
 }
 
-// J38: 读 /proc/self/maps，看 SO 的显示路径
-// （同时验证第 3 层 maps 伪造的必要性）
+/ J38: 读 /proc/self/maps，看 SO 的显示路径
+/ （同时验证第 3 层 maps 伪造的必要性）
 ```
 
 判据：

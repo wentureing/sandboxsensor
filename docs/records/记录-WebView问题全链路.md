@@ -40,7 +40,7 @@
 Via 主进程（容器 hook 覆盖范围）
   → 调 WebView API
     → IPC 到 sandboxed_process0（容器碰不到）
-      → 用真实路径读 file:///.../homepage2.html
+      → 用真实路径读 file://.../homepage2.html
         → 读不到（容器沙箱路径在 isolated uid 眼里不存在）
           → onReceivedError → Via 回退 loadData(html)
             → MIME 默认 text/plain → 显示源码
@@ -86,7 +86,7 @@ renderer 用**真实路径**访问真实存在的 `/sdcard/Download`，所以能
 ### 5.1 模式
 
 ```
-guest 的 WebView 请求 file://
+guest 的 WebView 请求 file:/
   → 宿主（有权限）在 guest 进程里拦截
     → 宿主按容器路径规则打开真实文件
       → 用 WebResourceResponse 把 stream 交给 WebView
@@ -99,7 +99,7 @@ guest 的 WebView 请求 file://
 
 | 视角 | 能否检测 | 依据 |
 | --- | --- | --- |
-| **WebView 内部（JS）** | **几乎不能** | `location.href` 仍是 `file://`；同源/CSP 一致；`performance.getEntries` 的 `transferSize` 在 `file://` 下本来就是 0 |
+| **WebView 内部（JS）** | **几乎不能** | `location.href` 仍是 `file:/`；同源/CSP 一致；`performance.getEntries` 的 `transferSize` 在 `file:/` 下本来就是 0 |
 | **guest 的 Java 代码** | **能** | ① 响应头缺 `Content-Length`/`Last-Modified` 时 `fetch().headers` 能看出；② 若 guest 自己设过 `WebViewClient`，行为差异可察觉 |
 | **系统/native** | 能看到 | 宿主自己的 `/proc/self/fd` 会暴露真实路径 |
 
@@ -111,7 +111,7 @@ guest 的 WebView 请求 file://
 
 | 价值 | 场景 |
 | --- | --- |
-| **高** | WebView 的 `file://`、`content://`、`assets/`、`Blob`（全是 isolated 进程） |
+| **高** | WebView 的 `file:/`、`content:/`、`assets/`、`Blob`（全是 isolated 进程） |
 | 中 | `BitmapFactory.decodeFile` → `decodeFileDescriptor`；`MediaPlayer.setDataSource(path)` → `setDataSource(fd)`；ExoPlayer 的 `ContentDataSource` |
 | 低 | guest 主进程的普通 `open`（容器已用路径翻译解决） |
 
@@ -139,7 +139,7 @@ guest 的 WebView 请求 file://
 | 禁用 WebView 多进程 | ❌ 不可行（`ro.webview.multiprocess` 等属性均为空，Android 10+ 应用无法控制） |
 | 换 X5/TBS 内核 | ❌ 被 framework 类问题堵死（X5 提供的是 `com.tencent.smtt.sdk.WebView`，guest 不会用） |
 | 沙箱迁到外部存储 | ❌ 前提被推翻（Gaia 在内部存储却做到了） |
-| **宿主代读（`WebResourceResponse`）** | ⚠️ **唯一与证据相符的方向**，但需要先找到可行的注入点（见 `计划-提升路线图.md` P1-3） |
+| **宿主代读（`WebResourceResponse`）** | ⚠️ **唯一与证据相符的方向**，但需要先找到可行的注入点（见 `计划/README.md` P1-3） |
 
 ---
 

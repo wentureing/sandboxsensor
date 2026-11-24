@@ -56,7 +56,7 @@
 ### 2.1 现状：21 个符号，其中 5 个只打日志
 
 ```cpp
-// native-hook.cpp:1593-1610 的 hook 表
+/ native-hook.cpp:1593-1610 的 hook 表
 {"open", ...}, {"openat", ...}, {"access", ...}, {"stat", ...}, {"lstat", ...},
 {"readlink", ...}, {"fopen", ...}, {"__system_property_get", ...},
 {"open64", ...}, {"openat64", ...}, {"fopen64", ...},
@@ -162,7 +162,7 @@
 
 ```
 WebView 的 renderer 在 isolated 进程（sandboxed_process0，独立 uid）
-  → 它读 file:///sdcard/x.html
+  → 它读 file://sdcard/x.html
     → 按自己的 uid 判权限
       → 读不到 guest 的沙箱（沙箱属 guest uid）
         → 只能读真实 /sdcard（但那是真实的，且可能被 DAC 拒）
@@ -196,7 +196,7 @@ WebView 的 renderer 在 isolated 进程（sandboxed_process0，独立 uid）
 | **合计** | | **4–5 天** |
 
 **关键风险**：
-- **`shouldInterceptRequest` 对主页面（`loadUrl("file://...")`）是否触发** —— **不确定**，需要先验证
+- **`shouldInterceptRequest` 对主页面（`loadUrl("file:/...")`）是否触发** —— **不确定**，需要先验证
 - 如果主页面不走它 → 只能改 `loadUrl` 的参数（但那要 hook `WebView` 类，更难）
 
 ### 4.4 一个更简单的替代：**把 HTML 直接写进沙箱，让 guest 用相对路径**
@@ -206,7 +206,7 @@ WebView 的 renderer 在 isolated 进程（sandboxed_process0，独立 uid）
   把 /sdcard/Download/x.html 拷到 <沙箱>/sdcard/x.html
 
 guest：
-  WebView.loadUrl("file://" + 自己的 externalFilesDir + "/x.html")
+  WebView.loadUrl("file:/" + 自己的 externalFilesDir + "/x.html")
     → renderer 读沙箱的绝对路径 → 仍然读不到（uid 不同）
 ```
 
@@ -214,7 +214,7 @@ guest：
 
 **除非**：把文件放在 **renderer 能读的地方**（如 `/data/local/tmp`，644）→ 但那等于放弃隔离。
 
-**所以 WebView 的 `file://` 在本架构下真的很难**：
+**所以 WebView 的 `file:/` 在本架构下真的很难**：
 - renderer 读不到沙箱（uid）
 - 代读要 hook `WebView` 类（framework 类，难）
 - **可能应该接受这个限制**（P1-3 降级或放弃）

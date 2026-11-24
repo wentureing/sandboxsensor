@@ -132,7 +132,7 @@ FILE_EXT /storage/emulated/0/Android/data/com.app.hider.../gaia/com.sandbox.prob
 ```
 
 **`FILE_EXT` 也落在沙箱镜像里** → adb 拉不到。
-→ 因此需要 `COLLECT_OUT`/`CAT_OUT` 这套导出机制（见 `计划-提升路线图.md` P0-2）。
+→ 因此需要 `COLLECT_OUT`/`CAT_OUT` 这套导出机制（见 `计划/README.md` P0-2）。
 
 ---
 
@@ -142,4 +142,4 @@ FILE_EXT /storage/emulated/0/Android/data/com.app.hider.../gaia/com.sandbox.prob
 | --- | --- | --- |
 | **路径镜像**（`/data/user/0/<guest_pkg>` 原样保留） | ✅ 值得，**独立于 WebView** | 需要改 `instanceId` 的目录布局，涉及迁移 |
 | **maps 过滤** | ✅ 值得，且是检测对抗的核心 | 需要改 native 快照逻辑 |
-| **宿主代读 WebView 的 `file://`** | ⚠️ 唯一可能的 WebView 方案 | 找不到注入点就白做；见 P1-3 |
+| **宿主代读 WebView 的 `file:/`** | ⚠️ 唯一可能的 WebView 方案 | 找不到注入点就白做；见 P1-3 |

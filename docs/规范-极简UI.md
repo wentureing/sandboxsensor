@@ -51,7 +51,7 @@ fun SafeCard(
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .background(color)          // drawRect，无 elevation、无圆角
+            .background(color)          / drawRect，无 elevation、无圆角
             .padding(10.dp),
         content = content
     )
@@ -69,7 +69,7 @@ fun SafeButton(
             .background(MaterialTheme.colorScheme.primary)
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
-                indication = null,                  // 明确关掉 ripple
+                indication = null,                  / 明确关掉 ripple
                 onClick = onClick
             )
             .padding(horizontal = 16.dp, vertical = 10.dp)
@@ -151,7 +151,7 @@ fun SafeDivider() {
 因此保留兜底开关（按 GPU 型号启用）：
 
 ```kotlin
-// 检测到高风险 GPU 时，对根 View 用软件图层
+/ 检测到高风险 GPU 时，对根 View 用软件图层
 if (Build.HARDWARE.contains("qcom") && glRenderer.contains("Adreno 8")) {
     window.decorView.setLayerType(View.LAYER_TYPE_SOFTWARE, null)
 }

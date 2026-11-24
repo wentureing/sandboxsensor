@@ -1,7 +1,7 @@
 # P0：DiagnosticsSink + probe-out 导出
 
 - 日期：2026-11-23
-- 依据：`docs/计划-提升路线图.md` 的 P0-1 / P0-2
+- 依据：`docs/计划/README.md` 的 P0-1 / P0-2
 - 基线 tag：容器 `pre-p0-baseline` = `a528e09`
 
 ---
@@ -30,8 +30,8 @@
 ### 1. `collectProbeOutput` 用真实沙箱根，不用 `virtualRoot`
 
 ```kotlin
-// ⚠️ virtualRoot = app_virtual（SandboxManager 的注入根，实测是空壳）
-// 真实 guest 数据在 files/virtual/data（见 docs/records/记录-双轨沙箱路径诊断.md）
+/ ⚠️ virtualRoot = app_virtual（SandboxManager 的注入根，实测是空壳）
+/ 真实 guest 数据在 files/virtual/data（见 docs/records/记录-双轨沙箱路径诊断.md）
 val realDataRoot = File(context.filesDir, "${VirtualConstants.VIRTUAL_DIR}/${VirtualConstants.VIRTUAL_DATA_DIR}")
 ```
 
@@ -60,7 +60,7 @@ val realDataRoot = File(context.filesDir, "${VirtualConstants.VIRTUAL_DIR}/${Vir
 ```kotlin
 inline fun event(phase: String, detail: () -> String) {
     val s = sink
-    if (s !== NoOp) s.onEvent(phase, detail())   // release 下 lambda 不执行
+    if (s !== NoOp) s.onEvent(phase, detail())   / release 下 lambda 不执行
 }
 ```
 

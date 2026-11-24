@@ -13,16 +13,16 @@
 ### 1.1 线程模型：**全在主进程主线程，全程同步**
 
 ```kotlin
-// CmdReceiver.kt:58
+/ CmdReceiver.kt:58
 override fun onReceive(context: Context, intent: Intent) {
-    val engine = EntryPointAccessors.fromApplication(...).engine()      // 主线程
+    val engine = EntryPointAccessors.fromApplication(...).engine()      / 主线程
     when (action) {
         ACTION_INSTALL -> {
-            val r = engine.installApp(path)                             // ← 阻塞，主线程
+            val r = engine.installApp(path)                             / ← 阻塞，主线程
             Log.i(TAG, "INSTALL $path -> $r")
         }
         ACTION_COLLECT_OUT -> {
-            val collected = sandbox.collectProbeOutput()                // ← 阻塞，主线程
+            val collected = sandbox.collectProbeOutput()                / ← 阻塞，主线程
         }
         ...
     }
@@ -56,12 +56,12 @@ GOT patch skipped (system lib, NS_HOOK_SYSTEM_LIBS=0): /apex/com.android.art/lib
 ### 1.3 测试逻辑的路径访问点
 
 ```kotlin
-// VirtualEngine.kt:345 installApp
+/ VirtualEngine.kt:345 installApp
 fun installApp(apkPath: String): VmResult<VirtualApp> {
-    val apkFile = File(apkPath)                              // ← File 构造不触发 IO
-    val result = frameworkApkParser.parseFullPackage(apkFile) // ← 这里读文件（open）
+    val apkFile = File(apkPath)                              / ← File 构造不触发 IO
+    val result = frameworkApkParser.parseFullPackage(apkFile) / ← 这里读文件（open）
     ...
-    File(splitPath).copyTo(destFile, overwrite = true)       // ← 这里也读文件
+    File(splitPath).copyTo(destFile, overwrite = true)       / ← 这里也读文件
 ```
 
 **`parseFullPackage(File)` 内部必然走 `FileInputStream` / `RandomAccessFile` → `open()` → native hook。**
@@ -218,7 +218,7 @@ fun installApp(apkPath: String): VmResult<VirtualApp> {
 
 **所以**：**如果让 guest 直接用真实路径（不翻译），就不需要重定向** —— 但**路径会暴露容器**。
 
-**这就是"兼容性 vs 隐蔽性"的根本取舍**（见 `架构-拦截能力层次.md` §3.5）。
+**这就是"兼容性 vs 隐蔽性"的根本取舍**（见 `架构/架构-拦截能力层次.md` §3.5）。
 
 ---
 
