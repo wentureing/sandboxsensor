@@ -398,6 +398,43 @@ node tools/release/gh-api.mjs "/repos/wentureing/sandboxsensor/actions/runs?per_
     → 每次构建都生成新 keystore → 每次签名不同 → `adb install -r` 必失败
   - 详见 `docs/输出/记录/记录-签名漂移根因-Cache-keystore从未生效.md`
 
+## 提交前必跑：本地静态检查（毫秒级）
+
+```powershell
+# 常规检查（括号平衡 / KDoc 内危险 /* / 注释未闭合）
+node tools/lint/kotlin-lint.mjs <改动的目录或文件>
+
+# 拆分/迁移代码后**必跑**：源文件的 private 成员有没有被新文件引用
+node tools/lint/kotlin-lint.mjs --deps <源文件> <引用它的新文件>
+```
+
+退出码 0 = 通过。**两个命令都在毫秒级**，不需要 Gradle / Android SDK。
+
+### 为什么自写，而不是用 detekt / ktlint
+
+联网核对过：**detekt 的类型解析不完整**（有实测报告：377 个编译器错误静默通过），
+ktlint / semgrep 同理 —— 它们**都不做完整类型解析，查不出「未定义符号 / 私有成员越界」**。
+那类错误只有编译器能查，而编译器需要 Gradle + Android SDK（分钟级）。
+
+所以分工是：
+
+| 层 | 工具 | 耗时 | 能拦什么 |
+| --- | --- | --- | --- |
+| **① 本地自写检查** | `tools/lint/kotlin-lint.mjs` | **毫秒** | 括号不平衡、KDoc 内 `/*`（Kotlin 块注释可嵌套 → Unclosed comment）、注释未闭合、**跨文件访问 private 成员** |
+| ② 编译器 | `module-test.yml`（只编译被测模块） | ~2 分钟 | 未定义符号、类型错误、可见性 |
+| ③ 完整构建 | `container-build.yml` | ~4 分钟 | 全部 + 打包 |
+
+**① 的存在意义**：把"本来要等 2 分钟 CI 才知道"的错，提前到提交前几毫秒发现。
+本项目已经连续 3 轮因为同一类问题（拆分后漏私有依赖 / KDoc 里的 `/*`）让 CI 失败。
+
+### 教训（真实案例）
+
+| 症状 | 根因 | ①能否拦 |
+| --- | --- | --- |
+| `ProcSpoofing.kt:151:1 Unclosed comment` | KDoc 里写了 `` `/proc/self/*` `` | ✅ 能（报出根因行并提示这是嵌套注释） |
+| `CustomerProbes.kt:473 Cannot access 'loginProbeLastSig': it is private` | 迁移代码时漏了改可见性 | ✅ 能（`--deps` 直接列出） |
+| `CustomerProbes.kt:303 Unresolved reference 'findField'` | 漏 import | ⚠️ 部分（只能靠编译器；①不查 import 完整性） |
+
 ## 其他约定
 
 - **Kotlin KDoc 里禁止出现 /****：Kotlin 块注释**可嵌套**。KDoc 里写路径通配
