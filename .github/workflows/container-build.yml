@@ -41,6 +41,7 @@ env:
   BUILD_TOOLS: '35.0.0'
 
   # 与 probe-build.yml 共享同一套固定 key：SDK 缓存可直接复用（~780MB 不必重下）
+  GRADLE_VERSION: '8.9'
   CACHE_EPOCH: 'v2'
 
 jobs:
@@ -110,7 +111,7 @@ jobs:
           path: |
             ~/.gradle/caches
             ~/.gradle/wrapper/dists
-          key: gradle-home-8.9-v2
+          key: gradle-home-${{ env.GRADLE_VERSION }}-${{ env.CACHE_EPOCH }}
 
       # 固定 debug keystore：否则每次构建都重新生成签名，
       # adb install -r 会报 INSTALL_FAILED_UPDATE_INCOMPATIBLE（必须卸载重装，沙箱数据全丢）。

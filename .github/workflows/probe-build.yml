@@ -39,7 +39,9 @@ env:
   BUILD_TOOLS: '35.0.0'
 
   # ★ 固定缓存键：只 bump 这个值才会让缓存整体失效
-  CACHE_EPOCH: 'v1'
+  # 必须与 container-build.yml 的 CACHE_EPOCH 一致，否则两个 workflow 各存一份 SDK/gradle
+  # （实测：container=v2 / probe=v1 -> 两份 SDK 780+783MB、两份 gradle 177+692MB，白占 957MB）
+  CACHE_EPOCH: 'v2'
 
 jobs:
   probe:
