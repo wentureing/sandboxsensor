@@ -114,11 +114,26 @@ jobs:
 
       # 固定 debug keystore：否则每次构建都重新生成签名，
       # adb install -r 会报 INSTALL_FAILED_UPDATE_INCOMPATIBLE（必须卸载重装，沙箱数据全丢）。
-      - name: Cache debug keystore
-        uses: actions/cache@v4
-        with:
-          path: ~/.android/debug.keystore
-          key: android-debug-keystore-v1
+      # 固定签名：从 Secret 注入固定的 debug.keystore
+      # 背景：Cache debug keystore 从未生效（Post 步骤报 Path Validation Error），
+      # 导致每次构建生成新 keystore -> 签名漂移 -> install -r 必失败。
+      # 详见 docs/records/记录-签名漂移根因-Cache-keystore从未生效.md
+      - name: Install fixed debug keystore
+        env:
+          KEYSTORE_B64: ${{ secrets.DEBUG_KEYSTORE_BASE64 }}
+        run: |
+          if [ -z "$KEYSTORE_B64" ]; then
+            echo "::warning::DEBUG_KEYSTORE_BASE64 未配置，签名将继续漂移"
+            exit 0
+          fi
+          mkdir -p "$HOME/.android"
+          echo "$KEYSTORE_B64" | base64 -d > "$HOME/.android/debug.keystore"
+          chmod 600 "$HOME/.android/debug.keystore"
+          echo "keystore installed: $(wc -c < "$HOME/.android/debug.keystore") bytes"
+          # 打印证书指纹，便于跨构建比对（不泄露私钥）
+          keytool -list -v -keystore "$HOME/.android/debug.keystore" \
+            -storepass android -alias androiddebugkey 2>/dev/null \
+            | grep -E "Owner:|SHA256:" || true
 
       - name: Build container APK
         working-directory: container
