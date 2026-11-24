@@ -113,7 +113,7 @@ public class WebViewProbeActivity extends Activity {
         status = new TextView(this);
         status.setTextSize(13);
         status.setPadding(12, 12, 12, 6);
-        status.setText("WebViewProbe v1.17 —— 打开即自动跑全部 W 实验，结果实时显示在下方");
+        status.setText("WebViewProbe v1.18 —— 打开即自动跑全部 W 实验，结果实时显示在下方");
         root.addView(status, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
@@ -977,60 +977,76 @@ public class WebViewProbeActivity extends Activity {
             try {
                 open = aph.getDeclaredMethod("open", String.class);
             } catch (NoSuchMethodException e) {
-                rec("W34 open(String) 不存在，尝试 open(Context, String)");
-                try {
-                    open = aph.getDeclaredMethod(
-                            "open", Context.class, String.class);
-                } catch (NoSuchMethodException e2) {
-                    rec("W34 open 的两种签名都不存在");
-                }
+                rec("W34 open(String) 不存在，改用 GURL（v1.18）");
             }
             if (open != null) open.setAccessible(true);
-            Method getMime = aph.getDeclaredMethod("getMimeType", InputStream.class, String.class);
-            getMime.setAccessible(true);
 
-            if (sandboxUrl != null) {
-                Object stream = null;
-                String openErr = null;
-                try {
-                    stream = open.invoke(null, sandboxUrl);
-                } catch (Throwable t) {
-                    openErr = t.getClass().getSimpleName() + ": " + t.getMessage();
-                }
-                rec("W34 open(沙箱 html) = "
-                        + (openErr != null ? "THREW " + openErr
-                        : (stream == null ? "null" : stream.getClass().getName())));
-                if (stream != null) {
-                    try {
-                        rec("W34 getMimeType(沙箱 html stream) = "
-                                + getMime.invoke(null, stream, sandboxUrl));
-                    } catch (Throwable t) {
-                        rec("W34 getMimeType 沙箱 FAIL: " + t.getClass().getSimpleName()
-                                + ": " + t.getMessage());
-                    }
-                }
-            }
-
-            Object tstream = null;
-            String tErr = null;
+            // v1.18：真实签名是 open(GURL) / getMimeType(InputStream, GURL)
+            Class<?> gurlClass;
+            java.lang.reflect.Constructor<?> gurlCtor = null;
+            Method openGurl = null;
+            Method getMimeGurl = null;
             try {
-                tstream = open.invoke(null, tmpUrl);
+                gurlClass = Class.forName("org.chromium.url.GURL", false, cl);
+                gurlCtor = gurlClass.getConstructor(String.class);
+                openGurl = aph.getDeclaredMethod("open", gurlClass);
+                getMimeGurl = aph.getDeclaredMethod("getMimeType", InputStream.class, gurlClass);
+                openGurl.setAccessible(true);
+                getMimeGurl.setAccessible(true);
+                rec("W34 GURL 路径就绪: " + gurlClass.getName());
             } catch (Throwable t) {
-                tErr = t.getClass().getSimpleName() + ": " + t.getMessage();
+                rec("W34 GURL 反射失败: " + t.getClass().getSimpleName() + ": " + t.getMessage());
             }
-            rec("W34 open(/data/local/tmp html) = "
-                    + (tErr != null ? "THREW " + tErr
-                    : (tstream == null ? "null" : tstream.getClass().getName())));
-            if (tstream != null) {
-                try {
-                    rec("W34 getMimeType(tmp stream) = " + getMime.invoke(null, tstream, tmpUrl));
-                } catch (Throwable t) {
-                    rec("W34 getMimeType tmp FAIL: " + t.getClass().getSimpleName()
-                            + ": " + t.getMessage());
-                }
+
+            if (openGurl != null && gurlCtor != null) {
+                probeOneProtocolUrl("沙箱 html", sandboxUrl, gurlCtor, openGurl, getMimeGurl);
+                probeOneProtocolUrl("/data/local/tmp html", tmpUrl, gurlCtor, openGurl, getMimeGurl);
+            } else {
+                rec("W34 skip 实测：GURL 反射不可用");
             }
         } catch (Throwable t) {
             rec("W34 FAIL: " + t.getClass().getSimpleName() + ": " + t.getMessage());
+        }
+    }
+
+    /** W34 的单次探测：open(GURL) + getMimeType(InputStream, GURL) */
+    private void probeOneProtocolUrl(String label, String url,
+                                     java.lang.reflect.Constructor<?> gurlCtor,
+                                     Method openGurl, Method getMimeGurl) {
+        if (url == null) {
+            rec("W34 [" + label + "] skip: url=null");
+            return;
+        }
+        try {
+            Object gurl = gurlCtor.newInstance(url);
+            Object stream;
+            try {
+                stream = openGurl.invoke(null, gurl);
+            } catch (Throwable t) {
+                Throwable cause = (t instanceof java.lang.reflect.InvocationTargetException
+                        && t.getCause() != null) ? t.getCause() : t;
+                rec("W34 [" + label + "] open THREW "
+                        + cause.getClass().getSimpleName() + ": " + cause.getMessage());
+                return;
+            }
+            rec("W34 [" + label + "] open = "
+                    + (stream == null ? "null" : stream.getClass().getName()));
+            if (stream == null) {
+                rec("W34 [" + label + "] 无流，getMimeType 跳过");
+                return;
+            }
+            try {
+                rec("W34 [" + label + "] getMimeType = "
+                        + getMimeGurl.invoke(null, stream, gurl));
+            } catch (Throwable t) {
+                Throwable cause = (t instanceof java.lang.reflect.InvocationTargetException
+                        && t.getCause() != null) ? t.getCause() : t;
+                rec("W34 [" + label + "] getMimeType THREW "
+                        + cause.getClass().getSimpleName() + ": " + cause.getMessage());
+            }
+        } catch (Throwable t) {
+            rec("W34 [" + label + "] FAIL: " + t.getClass().getSimpleName()
+                    + ": " + t.getMessage());
         }
     }
 
