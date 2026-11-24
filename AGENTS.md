@@ -245,6 +245,32 @@ node tools/release/gh-api.mjs --dispatch module-test.yml main \
 **为什么按包**：整模块测试会连坐（一个包改坏、全模块红），按包跑能直接定位到刚拆的那部分，
 且更快（只编译一个模块 + 只跑匹配类）。
 
+### 规则 10：拆分必须证明「逻辑未变」
+
+> **golden 只锁定当前行为，不能证明重构没改逻辑。** 搬运代码后必须对照 `_ref` 的原始实现。
+
+```powershell
+# 1) 导出重构前的文件（commit 必须用容器仓库的，不是主仓库的）
+git -C _ref/ShitJumpingVM show <commit>:<path> | Set-Content tools/tmp/old.kt -Encoding UTF8
+
+# 2) 对比函数体逻辑（归一化：去注释/字符串内容/空白）
+node tools/lint/check-refactor-equivalence.mjs `
+  --old-file tools/tmp/old.kt --old-fn <旧函数名> `
+  --new-file <当前文件> --new-fn <新函数名>
+```
+
+| 结果 | 要求 |
+| --- | --- |
+| **等价 ✓** | 纯搬迁，通过 |
+| **不等价 ✗** | 必须在镜像文档「偏差登记」里解释**语义为何等价**；解释不通就是重构引入的行为变化，要回退 |
+| 逻辑确实应当改变 | 走 `docs/输出/变更/<date>-<task>.md` 变更流程，**不能藏在重构里** |
+
+**已知的结构性改造（允许不等价）**：把"直接读某类的私有字段"改成"构造时回调注入"，
+如 `translatePath` 的 `hiddenPaths.contains(x)` → `isHidden(x)`。
+
+**为什么需要这条**：本轮 golden 是按重构后的实现推导的 —— 如果抽取时逻辑被改了，
+golden 会一起错，测试照样绿。静态等价检查是**唯一能证伪"逻辑没动"的手段**。
+
 ### 每类目录回答什么问题
 
 | 目录 | 回答 | 什么时候读 |

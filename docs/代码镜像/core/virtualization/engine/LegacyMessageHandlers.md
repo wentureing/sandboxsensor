@@ -62,3 +62,18 @@ JVM 单测里这些类不存在，反射必然失败 —— 而"失败降级"正
 
 **若将来要单测**：需要引入 Robolectric（能提供 \ActivityThread\/\Message\ 的真实行为），
 或在 handler 里把"消息解析"与"反射执行"拆成两步，只测前者。
+
+## 偏差登记（v158d 静态等价检查结果）
+
+用 `tools/lint/check-refactor-equivalence.mjs` 对比 v151 拆分前后（`_ref` 仓库 `63346e6`），
+三个 handler 都报「不等价」，逐项确认如下：
+
+| 差异 | 是否改变业务逻辑 | 类型 |
+| --- | --- | --- |
+| 新增 `DebugTrace.event("legacy", ...)` | ❌ 只在 `DebugFlags` 开启时写调试日志，不改控制流 | ✅ 必要偏差（可观测性插桩） |
+| `Timber.tag(TAG)` → `Timber.tag(TAG_LEGACY)` | ❌ 仅日志 tag 改名，便于按模块过滤日志 | ✅ 必要偏差 |
+| 反射字段读写 / classloader 替换 / 条件判断 | 逐字相同 | — |
+
+**为什么允许**：拆分的目的是让人能分清职责，插入可观测点属于拆分收益的一部分
+（日志 tag 从 `ATHook` 细化为 `ATHook` + `legacy` 前缀）。但它确实是行为变化，
+所以必须在此登记，而不能藏在"纯搬迁"的说法下。
