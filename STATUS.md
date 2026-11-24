@@ -63,7 +63,7 @@
 | # | 问题 | 现状 / 下一步 |
 | --- | --- | --- |
 | 1 | **WebView MIME** | 已知：Java 不参与（F3）、chromium 不 patch（F4）、URL 在 dataDir 内（F5）。剩下两条路：① 让 `file://` 落到 native 的标准分支（需改 dataDir，但**普通 guest 无规则兜底**，是短命补丁）；② 做宿主代读（W11 有效，但注入时机做不到，F10）。**详见 `docs/输出/记录/记录-W2-text-plain机制收敛.md`** |
-| 2 | Java 层重定向是否真的通了 | v141+v142 已构建并部署，复测 W38（写 `/sdcard` 是否从失败变成功） |
+| 2 | ~~Java 层重定向是否真的通了~~ | ✅ **已确认打通**（`rules=11` + W38 写 `/sdcard` 成功且落沙箱）。延伸项：扩到 `stat/lstat/readlink/unlink/rename/mkdir` |
 | 3 | 注入位置是否还有漏项 | `setupPathFidelityRedirections` / `registerVirtualSdcard` / `installDeferredProxies` 三项待确认是否也要搬到 guest |
 | 4 | 反检测何时接线 | 需先修 `AntiDetectionEngine` 两个缺陷（`is_path_hidden` 精确匹配、无 `readdir` 过滤） |
 
