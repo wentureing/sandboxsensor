@@ -101,7 +101,45 @@ git remote set-url origin https://github.com/wentureing/sandboxsensor.git
 
 **一句话**：栈顶在驱动里，不代表病因在驱动里；breadcrumb 是正向记录过程，比从结果倒推可靠。
 
-详细用法见 `docs/调试指南.md`。
+详细用法见 `docs/输出/调试指南.md`。
+
+## 文档结构：五类目录 + 错误结论归档
+
+**（2026-11-24 重组。旧路径 `docs/records/`、`docs/changes/`、`docs/调研/` 已不存在）**
+
+```
+docs/
+├── README.md     总索引 + 写作约定
+├── 计划/         要做什么、什么顺序
+├── 架构/         怎么运作（机制/边界/坑）
+├── 设计/         为什么这么选（选型/路线取舍/规范）
+├── 现状/         现在什么生效、什么没生效（事实快照）
+├── 输出/         做过什么（记录/变更/调研/调试手册/操作）
+├── archive/      **错误结论归档**
+└── diagrams/
+```
+
+### 硬性规则
+
+| # | 规则 |
+| --- | --- |
+| 1 | **结论必须带实测证据**（探针编号 / logcat 片段 / 反汇编结果），不能只有推理 |
+| 2 | **被推翻的结论不删**：移到 `docs/archive/错误结论-<年月>/`，并在该目录 `README.md` 登记「原结论 / 被什么推翻 / 现在看哪里」 |
+| 3 | **引用任何结论前先对照 `archive/`** —— 里面每条都写明它错在哪 |
+| 4 | 一份文档只回答一个问题；跨主题就拆 |
+| 5 | 文档间引用用相对路径；移动文档时同步更新引用 |
+| 6 | 能力状态变化（✅/❌）必须在同一提交里更新 `docs/现状/README.md` 的「能力生效状态」表 |
+
+### 每类目录回答什么问题
+
+| 目录 | 回答 | 什么时候读 |
+| --- | --- | --- |
+| `计划/` | 接下来做什么 | 定任务、看优先级 |
+| `架构/` | 它怎么运作 | **改代码前必读** |
+| `设计/` | 为什么这么选 | 要推翻/延续设计决策时 |
+| `现状/` | 现在什么样 | 判断某能力是否真生效 |
+| `输出/` | 做过什么、证据在哪 | 复盘、找实测数据 |
+| `archive/` | 哪些结论是错的 | **引用结论前对照** |
 
 ## 大量精确修改前必须落盘修改计划
 
@@ -112,7 +150,7 @@ git remote set-url origin https://github.com/wentureing/sandboxsensor.git
 
 ### 第 1 步：落盘修改计划（改之前）
 
-文件：`docs/changes/<YYYYMMDD>-<任务名>.md`
+文件：`docs/输出/变更/<YYYYMMDD>-<任务名>.md`
 
 必须包含：
 
@@ -129,14 +167,14 @@ git remote set-url origin https://github.com/wentureing/sandboxsensor.git
 
 ```powershell
 # 方案 A：先改到工作区，用 git 生成真实 diff，再决定是否提交
-git -C _ref/ShitJumpingVM diff > docs/changes/<date>-<task>.diff
+git -C _ref/ShitJumpingVM diff > docs/输出/变更/<date>-<task>.diff
 git -C _ref/ShitJumpingVM diff --stat
 
 # 方案 B：不确定时，先把"打算改什么"写成 patch 文本，用 --dry-run 校验
 git -C _ref/ShitJumpingVM apply --check my.patch
 ```
 
-**落盘后停下来等确认**：`docs/changes/<...>.md` 写完即报告"计划已就绪，请查看"，
+**落盘后停下来等确认**：`docs/输出/变更/<...>.md` 写完即报告"计划已就绪，请查看"，
 **不要在同一条回复里继续改代码**（除非明确说"直接改"）。
 
 ### 第 2 步：改完后追加实际 diff（改之后）
@@ -144,8 +182,8 @@ git -C _ref/ShitJumpingVM apply --check my.patch
 在同一文件的 `## 实际变更` 章节追加：
 
 ```powershell
-git -C _ref/ShitJumpingVM diff > docs/changes/<date>-<task>.actual.diff
-git -C _ref/ShitJumpingVM diff --stat >> docs/changes/<date>-<task>.actual.diff
+git -C _ref/ShitJumpingVM diff > docs/输出/变更/<date>-<task>.actual.diff
+git -C _ref/ShitJumpingVM diff --stat >> docs/输出/变更/<date>-<task>.actual.diff
 ```
 
 **`.actual.diff` 与计划中的"预期"不一致时，必须在文档里解释差异原因**。
@@ -178,7 +216,7 @@ git -C _ref/ShitJumpingVM diff --stat >> docs/changes/<date>-<task>.actual.diff
 45386771274  build-container  push   2852d50   <- 不该跑
 ```
 
-详见 `docs/changes/20261124-ci-manual-dispatch-only.md`。
+详见 `docs/输出/变更/20261124-ci-manual-dispatch-only.md`。
 
 ### 正确的触发方式
 
@@ -266,7 +304,7 @@ node tools/release/gh-api.mjs "/repos/wentureing/sandboxsensor/actions/runs?per_
   - 本项目的 `Cache debug keystore` **一直没生效**：Post 步骤报
     `[warning]Path Validation Error: Path(s) ... do(es) not exist`
     → 每次构建都生成新 keystore → 每次签名不同 → `adb install -r` 必失败
-  - 详见 `docs/records/记录-签名漂移根因-Cache-keystore从未生效.md`
+  - 详见 `docs/输出/记录/记录-签名漂移根因-Cache-keystore从未生效.md`
 
 ## 其他约定
 
@@ -286,7 +324,7 @@ node tools/release/gh-api.mjs "/repos/wentureing/sandboxsensor/actions/runs?per_
     - `/data/local/tmp/` 也可用（644，无需额外授权）
     - **不要用 `run-as` 验证应用权限**：`run-as` 跑在 `runas_app` SELinux 域，
       与应用的 `untrusted_app` 域不同，它的 `Permission denied` **不代表**应用读不到
-    - 详见 `docs/records/记录-导入通道真实约束.md`（含更正说明）
+    - 详见 `docs/输出/记录/记录-导入通道真实约束.md`（含更正说明）
     - 用法：`adb push x.apk /sdcard/Download/` 或 `/data/local/tmp/`
       然后 `INSTALL --es path <path>`
   - 其他路径仍需放到 app 私有目录（容器自身把 `/sdcard` 重定向到沙箱）

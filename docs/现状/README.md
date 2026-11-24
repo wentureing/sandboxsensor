@@ -1,0 +1,50 @@
+# 现状（`docs/现状/`）
+
+> 回答：**现在到底是什么样**——能力是否真的生效、哪些代码是死的。
+> 这是「事实快照」，会随代码变化而失效，**每次大改后要回来更新**。
+
+---
+
+## 一、文档
+
+| 文档 | 内容 | 时效 |
+| --- | --- | --- |
+| **`零调用扫描报告.md`** | 哪些类/方法写了但**从未被调用**（含行数、调用点判定） | 2026-11-24 快照 |
+| **`索引.md`** | 旧版调研索引（历史入口，内容已并入本目录与 `docs/README.md`） | 2026-11-24 |
+
+## 二、能力生效状态（2026-11-24 快照）
+
+> 判据：**"代码存在" ≠ "生效"**。本表只记"实测/代码证据确认生效"的项。
+
+| 能力 | 状态 | 证据 / 备注 |
+| --- | --- | --- |
+| Binder 代理（AM/PM/系统服务） | ✅ 生效 | `installAllProxies` 在 `VirtualEngine.initialize()`（每进程） |
+| `VirtualContext` 路径改写（26 个 override） | ✅ 生效 | 探针 W36：`getFilesDir()` 返回沙箱真路径 |
+| native GOT/PLT patch（被 patch 的 so） | ✅ 生效 | 架构文档 + `NS_HOOK_SYSTEM_LIBS=0` 日志 |
+| **路径重定向规则（guest 进程）** | ✅ **v142 起生效** | 之前 `rules=0`（规则只在主进程注册） |
+| **Java 层文件 I/O 重定向** | ⚠️ **已装但未验证生效** | v141 `RegisterNatives` 成功（`installed=true`），但 W38 写 `/sdcard` 仍失败；v142 补规则后待复测 |
+| `/proc/self` spoof、进程名、seccomp | ✅ 生效 | `ensureGuestApplicationBooted`（guest） |
+| `WebViewWarmup`（provider 预热/修复） | ✅ 生效 | guest bind complete 时调度 |
+| v138 进程 Application → guest | ✅ 生效 | 探针 W32：`currentApplication()` 的 class 是 `ProbeApplication` |
+| **WebView `file://` 的 MIME** | ❌ **未解决** | 沙箱 `.html` → `text/plain`（Via 主页显示源码） |
+| `AntiDetectionEngine`（805 行 / 40+ 处 hide/spoof） | ❌ **零调用** | 见 `零调用扫描报告.md` |
+| `IdentitySpoofingEngine`（`Build.SERIAL` 等） | ❌ **零调用** | README 明示"未应用" |
+| `FileAccessInterceptor`（fake content / listFiles） | ❌ **零调用** | v141 另写了 native 实现 |
+| `ensureWebViewResources`（WebView 资源注入） | ❌ **零调用，且刻意不调** | 接线过，导致 Via boot loop，已回退 |
+
+## 三、设备/构建环境快照
+
+| 项 | 值 |
+| --- | --- |
+| 测试设备 | `10AFA8169Z0039G`（vivo V2463A / Android 15 / arm64-v8a / PAGESIZE=4096） |
+| 容器版本 | `1.0.0-<7位sha>`（`versionCode = GITHUB_RUN_NUMBER`，递增） |
+| 容器 uid | 每次干净安装会变（如 `u0_a333` → `u0_a341`）→ **vivo 的日志管控按 uid 生效，guest 的 `Log.i` 可能被吞** |
+| 签名 | 固定 keystore，SHA-256 `60:AD:A6:…:40:B3:2C` |
+| WebView | Chrome/126.0.6478.71（`/product/app/WebViewGoogle64/`） |
+| Gradle / NDK | Gradle 8.9 / NDK 27.1.12297006 / CMake 3.22.1 |
+
+## 四、维护约定
+
+1. 本目录只放**可核对的事实**（带命令/日志/探针编号），不放推测
+2. 状态从 ✅ 变 ❌、或反之，**必须在同一提交里更新本表**
+3. 快照要写日期；超过一个大版本（Android 大版本或容器大改）就重扫

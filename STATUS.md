@@ -1,188 +1,118 @@
 # 项目状态（STATUS）
 
-> 最后更新：**2026-11-23**
-> 本文件是唯一「当前状态」入口。历史细节见 `docs/records/`，调研见 `docs/01`–`docs/07`，计划见 `docs/计划-提升路线图.md`。
+> 最后更新：**2026-11-24 22:40（device）**
+> 本文件是唯一「当前状态」入口。文档怎么找见 `docs/README.md`；历史证据见 `docs/输出/`；
+> **被推翻的结论见 `docs/archive/错误结论-2026-11/`（引用任何结论前先对照一遍）**。
 
 ---
 
+## 0. 一句话现状
 
-## 2026-11-24 17:20 验证通过（CI #40 / versionCode=40）
+容器已能跑 Via 与探针；**WebView 的 `file://` MIME 问题未解决**（Via 主页显示源码）。
+本轮最大进展：查清了**路径转换三层机制**、**注入时机审计**，并完成了
+**Java 层文件 I/O 重定向**的实现（v141 hook + v142 guest 补规则），正在复测。
 
-三项同时落地并实测：
+---
 
-| # | 项 | 容器提交 | 验证证据 |
-| --- | --- | --- | --- |
-| 1 | **修复双轨沙箱** | 1d3e2bb | iles/virtual 有 apks/apps/data/snapshots；**pp_virtual 不再创建**；data 下 30 个文件 |
-| 2 | **固定签名** | 45a6af2（workflow） | install -r 成功覆盖（不再报 INSTALL_FAILED_UPDATE_INCOMPATIBLE） |
-| 3 | **P0-3 主进程不装 hook** | 4e85a4 + de50a82 + 1631541 | 日志明确：17:19:37.834 initNativeHooks skipped: container main process (proc=com.nextvm.app)（主进程 pid 12930）+ 17:19:38.799 PLT hooks installed successfully（guest 进程 pid 13085） |
+## 1. 本轮（2026-11-24 晚）确定的事实
 
-**删掉 is_import_read_exempt 的实证**：
-- import exempt 日志命中 **0**
-- APK file not found 命中 **0**
+| # | 事实 | 证据 |
+| --- | --- | --- |
+| **F1** | 沙箱 `.html` 经 `file://` 得到 `document.contentType = text/plain`；`/data/local/tmp` 的同一个 HTML 得到 `text/html` | 探针 W2 vs W14 |
+| **F2** | 变量**不是** BOM、不是写入者、不是 `virtual/data` 路径段 | W35 四组合 / W17 / W18 |
+| **F3** | 普通 `file://` 的 **Java `AndroidProtocolHandler.open()` 返回 null**（两条路径都是）→ Java 侧不参与 MIME 判定 | W34（真实签名是 `open(GURL)`） |
+| **F4** | `libwebviewchromium.so` **未被容器 patch**（在 `/product/`，NS_HOOK_SYSTEM_LIBS=0） | logcat 无 patch 记录 |
+| **F5** | WebView 认为的 `dataDir` 实际是**沙箱路径**（`url.startsWith(dataDir)=true`） | W36 |
+| **F6** | **Gaia 里同一个探针 W2/W3 都正常** → 「沙箱路径必然嗅探」是错的，只有我们容器如此 | Gaia 对照记录 |
+| **F7** | 容器**客主进程不装 hook**（P0-3 生效） | logcat `initNativeHooks skipped: container main process` |
+| **F8** | **guest 进程的重定向规则表曾经是空的**（`rules=0`） | `<filesDir>/v141-javaio.log` |
+| **F9** | `RegisterNatives` 替换 `libcore.io.Linux.open/access` **能装成功**（`installed=true`） | 同上 |
+| **F10** | v137（包装 `WebViewClient` 补 MIME）**时序上做不到**：`loadUrl` 早于任何视图树扫描 | `installed=0(+132ms) → installed=1(+10s)`、`delegated=0` |
 
-→ 主进程不装 hook 后，installApp 直接读真实 /sdcard/Download/x.apk，**整条豁免机制（p18→p28→p29 三次迭代）全部消失**。
+## 2. 已确认的边界（**不要再重复调查**）
 
-**签名指纹固定为**：
-`
-SHA256: 60:AD:A6:9E:3B:72:E0:97:DB:00:47:CE:DA:02:53:ED:83:6F:FA:3E:F6:2E:9F:10:26:87:63:AB:B2:40:B3:2C
-`
-（Secret DEBUG_KEYSTORE_BASE64；keystore 不在仓库里）
+| # | 结论 | 记录 |
+| --- | --- | --- |
+| 1 | RenderThread SIGABRT 是容器 native hook 污染 GPU 驱动，不是 Adreno 缺陷 | `docs/输出/记录/记录-native-hook作用域与污染.md` |
+| 2 | hook 作用域：容器自身 + 图形栈永不 patch；系统库默认不 patch（`NS_HOOK_SYSTEM_LIBS=0`） | 同上 |
+| 3 | **Java 层文件 I/O 原先没有任何重定向**（`hookFileClass()` 是空实现） | `docs/架构/架构-路径转换机制摸底.md` |
+| 4 | **普通 guest 没有 `/data/user/0/<guest>/` 规则**（只在 pathFidelity 注册） | 同上 |
+| 5 | 容器内文字选择正常，问题只在 WebView（渲染在 isolated 进程） | `docs/输出/记录/记录-工程体检.md` |
+| 6 | Gaia 沙箱在 `/data/user/0/<容器>/gaia/`（内部存储），且**不靠任何 WebView hook 就正常** | `docs/输出/记录/记录-Gaia内WebView对照…md` |
+| 7 | 容器不属于 VirtualApp 家族；上游 = `TanvirHossain2/NEXTVM` | `docs/输出/记录/记录-上游溯源.md` |
+| 8 | 两家沙箱根并存：`app_virtual/`（名义）vs `files/virtual/`（实际） | `docs/输出/记录/记录-双轨沙箱路径诊断.md` |
+| 9 | **注入点 ≠ 生效进程**：`launch()`（主进程）里写的"环境设置"不会传到 guest | `docs/架构/架构-注入时机审计.md` |
 
-## 0. 开工前必读
+## 3. 容器当前能力状态
 
-### 0.1 排查顺序（本项目已绕弯路的教训）
+详见 `docs/现状/README.md` 的「能力生效状态」表。要点：
 
-> **guest 行为异常但没崩溃/没栈时，先看 `GuestBreadcrumb`**（logcat tag = `BootCrumb`），
-> 再看探针 P/N 系列，**最后**才看 native 栈。详见 `AGENTS.md` 与 `docs/调试指南.md`。
+| 能力 | 状态 |
+| --- | --- |
+| Binder 代理、`VirtualContext` 路径改写、native GOT patch | ✅ 生效 |
+| guest 路径重定向规则 | ✅ **v142 起生效**（之前 `rules=0`） |
+| Java 层文件 I/O 重定向 | ⚠️ 已装（v141），**待复测**（v142 补规则后 W38 是否通过） |
+| v138 进程 Application → guest | ✅ 生效（W32 的 class 是 `ProbeApplication`） |
+| **WebView `file://` MIME** | ❌ **未解决** |
+| `AntiDetectionEngine` / `IdentitySpoofingEngine` / `FileAccessInterceptor` | ❌ 零调用 |
 
-上游 NEXTVM 已埋 **199 处** breadcrumb，记录有序、带时间戳、含被吞异常的完整栈。
+## 4. 当前未决问题
 
-**本项目三次弯路都是因为跳过它、从结果倒推**：
+| # | 问题 | 现状 / 下一步 |
+| --- | --- | --- |
+| 1 | **WebView MIME** | 已知：Java 不参与（F3）、chromium 不 patch（F4）、URL 在 dataDir 内（F5）。剩下两条路：① 让 `file://` 落到 native 的标准分支（需改 dataDir，但**普通 guest 无规则兜底**，是短命补丁）；② 做宿主代读（W11 有效，但注入时机做不到，F10）。**详见 `docs/输出/记录/记录-W2-text-plain机制收敛.md`** |
+| 2 | Java 层重定向是否真的通了 | v141+v142 已构建并部署，复测 W38（写 `/sdcard` 是否从失败变成功） |
+| 3 | 注入位置是否还有漏项 | `setupPathFidelityRedirections` / `registerVirtualSdcard` / `installDeferredProxies` 三项待确认是否也要搬到 guest |
+| 4 | 反检测何时接线 | 需先修 `AntiDetectionEngine` 两个缺陷（`is_path_hidden` 精确匹配、无 `readdir` 过滤） |
+
+## 5. 设备与构建环境
+
+| 项 | 值 |
+| --- | --- |
+| 测试设备 | `10AFA8169Z0039G`（vivo V2463A / Android 15 / arm64-v8a） |
+| 设备时钟 | 比 PC 快约 1 分 51 秒；日志按**设备时间**切片 |
+| 容器 | `1.0.0-<7位sha>`（`versionCode = GITHUB_RUN_NUMBER`） |
+| 容器 uid | **每次干净安装会变**（`u0_a333` → `u0_a341`）→ **vivo 按 uid 管控日志，guest 的 `Log.i` 会被吞**（诊断请写文件，别依赖 logcat） |
+| 签名 | 固定 keystore，SHA-256 `60:AD:A6:9E:…:40:B3:2C` |
+| WebView | Chrome/126.0.6478.71 |
+| 工具链 | Gradle 8.9 / NDK 27.1.12297006 / CMake 3.22.1 |
+
+### CI 纪律（用户明确要求）
+
+> **一次只触发一个编译 CI，且要明确指定是容器还是探针。**
+
+```powershell
+node tools/release/gh-api.mjs --dispatch probe-build.yml main       # 探针
+node tools/release/gh-api.mjs --dispatch container-build.yml main   # 容器
+```
+
+- `push` **不会**触发任何编译（两个 workflow 已去掉 `push` 触发）
+- 触发后不要轮询阻塞；需要结果时单独查一次
+- 当前容器 workflow 的 **Unit tests 步骤被临时 `if: false` 暂停**（加快迭代），恢复方式写在 workflow 注释里
+
+## 6. 文档导航
+
+| 想了解 | 去哪 |
+| --- | --- |
+| 文档总索引 / 写作约定 | `docs/README.md` |
+| 系统怎么运作 | `docs/架构/README.md` |
+| 为什么这么设计 | `docs/设计/README.md` |
+| 现在什么生效、什么没生效 | `docs/现状/README.md` |
+| 做什么、什么顺序 | `docs/计划/README.md` |
+| 证据、变更、调研、调试手册 | `docs/输出/README.md` |
+| **哪些结论是错的** | `docs/archive/错误结论-2026-11/README.md` |
+
+## 7. 开工前必读的排查顺序
+
+> **guest 行为异常但没崩溃/没栈时，先看 `GuestBreadcrumb`**（logcat tag = `BootCrumb`，
+> 文件在 `<沙箱>/files/breadcrumb-<pid>.log`），再看探针 P/N/W 系列，**最后**才看 native 栈。
+
+上游 NEXTVM 埋了 199 处 breadcrumb（有序、带时间戳、含被吞异常完整栈）。
+
+**本项目绕过的弯路都是因为跳过它、从结果倒推**：
 
 | 弯路 | 错误归因 | 真实原因 |
 | --- | --- | --- |
 | RenderThread SIGABRT | Adreno 驱动缺陷 | 容器 native hook 污染 GPU 驱动 |
-| 长按 ANR | `WindowManager`/`PopupWindow` | 只在 WebView 里出现（isolated 进程） |
-| Via 主页源码 | MIME / WebView 库未 patch / 沙箱该放外部 | WebView 渲染在 isolated 进程 |
-
-### 0.2 已确认的边界（**不要再重复调查**）
-
-| # | 结论 | 记录 |
-| --- | --- | --- |
-| 1 | **RenderThread SIGABRT 是容器 native hook 污染 GPU 驱动**，不是 Adreno 缺陷 | `记录-native-hook作用域与污染.md` |
-| 2 | hook 作用域：**容器自身 + 图形栈永不 patch**；系统库默认不 patch（`NS_HOOK_SYSTEM_LIBS=0`） | 同上 |
-| 3 | **WebView 渲染在 `webview_zygote` 派生的 isolated 进程**，容器 hook 覆盖不到 | `记录-WebView问题全链路.md` |
-| 4 | 因此 patch `libwebviewchromium*` **无效**（p17 已回退，分支 `backup-webview-hook`） | 同上 |
-| 5 | 容器内**文字选择完全正常**（复制/全选/搜索/分享 都显示）——问题只在 WebView | 同上 |
-| 6 | **Gaia 沙箱在 `/data/user/0/<容器>/gaia/`（内部存储）**，不是 `/sdcard` | `记录-Gaia机制分析.md` |
-| 7 | Gaia 做到了「maps 无宿主痕迹」（`hostHits=0`），我们 `pkg_hit=13` | 同上 |
-| 8 | 容器不属于 VirtualApp 家族（VA 标识 0 命中），Apache-2.0，上游 = TanvirHossain2/NEXTVM | `记录-上游溯源.md` |
-| 9 | **两家沙箱根并存**：`app_virtual/`（`SandboxManager`）vs `files/virtual/`（实际使用）——上游 bug | `记录-双轨沙箱路径诊断.md` |
-| 10 | 容器内 adb **读不到** Gaia 沙箱；观察必须靠「在容器内运行的探针」 | `记录-Gaia机制分析.md` |
-
-### 0.3 进行中的计划
-
-见 **`docs/计划-提升路线图.md`**（P0/P1/P2 完整设计 + 验收标准）。
-
-```
-P0-1 DiagnosticsSink 接口 + NoOp          ✅ 完成 a7650f2
-P0-2 probe-out + CmdReceiver 三命令       ✅ 完成 a7650f2（COLLECT/LIST 实测通过，CAT_OUT 待 p27+ 验证）
-P0-3 进程分割 + 删除路径豁免               ⏭ 下一步（p18 的 /sdcard/Download 豁免从根上无效）
-P1-2 HostReadPolicy + 17 条纯 JUnit       ✅ 完成 0cef67f（p26 CI 全绿）
-P1-1 :core:diagnostics + SelfCheckRunner  待 P0-3 之后
-P1-3 WebView 宿主代读最小版                需先验证 Gaia 机制（探针 v1.8）
-```
-
-**下一步应该是**：落盘 `docs/changes/20261123-*.md` 修改计划 → 等确认 → 编码。
-
----
-
-## 1. 两个仓库
-
-| 仓库 | 角色 | 说明 |
-| --- | --- | --- |
-| `wentureing/sandboxsensor` | **主仓库**：探针 + 文档 + 全部 CI | 所有 workflow 都挂这里 |
-| `wentureing/ShitJumpingVM` | 容器骨架（fork） | 只放代码，**不含 CI** |
-
-本地副本（`_ref/`，已 gitignore）：
-
-```
-_ref/ShitJumpingVM   容器源码（origin = wentureing/ShitJumpingVM）
-_ref/NestSpace       摘件来源（Apache-2.0）
-_ref/NEXTVM          上游快照（仅溯源）
-_ref/android-vm      自研 DEX 运行时（边界案例）
-_ref/aosp/raw        AOSP 官方文档归档
-```
-
----
-
-## 2. CI
-
-| workflow | 触发 | 产物 |
-| --- | --- | --- |
-| `build-probe` | push（`probe/**`、workflow 自身）+ 手动 | `probe-<7位sha>-<abi>.apk` |
-| `build-container` | push（仅 workflow 自身）+ 手动 | `container-shitjumpingvm-<7位sha>.apk` |
-
-**产物形态**：Release tag `apk-latest`，下载即 `.apk` 原文件，**不经过 artifact zip**。
-**Release 只保留最新一组**（`tools/release/gh-clean-release.mjs`）。
-
----
-
-## 3. 探针（`com.sandbox.probe` **v1.7** / `versionCode 8`）
-
-| 项 | 值 |
-| --- | --- |
-| 条目 | **74+**（含 `procstat`/`maps`/`soload`/`crosspkg`/`prop`/`fd`/`mount`/`uiprobe` 等分组） |
-| 主入口 | **`UiTestActivity`**（LAUNCHER；显示纯文字页 + 后台跑 `ProbeRunner`） |
-| 备用入口 | `ProbeActivity`（被容器拉起时不可控，保留） |
-| 输出通道 | ① logcat 分块 base64（`REPORT v1 part n/m`，**主通道**）② `files/probe-report.json` ③ `getExternalFilesDir` 副通道（**容器内会落到沙箱镜像，adb 拉不到**） |
-| 导入容器后 | 需 `COLLECT_OUT` 才能把报告取出来（P0-2 计划中） |
-
-**基线**：直接安装的 74 项完整报告见 `probe-reports/report-*.json`；
-Gaia 内运行的对照见 `记录-Gaia机制分析.md`。
-
----
-
-## 4. 容器现状（**p19**）
-
-### 4.1 已打补丁
-
-| # | 补丁 | 内容 |
-| --- | --- | --- |
-| p13/p15 | hook 作用域重写 | 容器自身 + 图形栈永不 patch |
-| p16 | `CmdReceiver` 恢复 | `INSTALL` / `LAUNCH` / `LAUNCH_ACTIVITY` / `UNINSTALL` / `LIST` |
-| p17 | WebView 白名单 | **已回退**（无效），分支 `backup-webview-hook` |
-| p18 | 导入只读豁免 | `/sdcard/Download/`、`/storage/emulated/0/Download/`、`/data/local/tmp/` |
-| p19 | 回退 p17 | 导入豁免保留 |
-
-### 4.2 已知缺陷（按优先级）
-
-| 优先级 | 缺陷 | 状态 |
-| --- | --- | --- |
-| P0 | WebView 本地页在容器内不可用（isolated 进程） | ❌ 未解，P1-3 计划中 |
-| P1 | `P13` 宿主包可见、`P16` 宿主 data 可 stat | ❌ 未修 |
-| P1 | maps 暴露宿主包名（`N10 pkg_hit=13`） | ❌ 未修（Gaia 已做到 `hostHits=0`） |
-| P2 | 两家沙箱根并存（`app_virtual` vs `files/virtual`） | ❌ 上游 bug，P2-1 计划中 |
-| P2 | 未声明 `READ_MEDIA_*`（Android 13+） | ❌ 未做 |
-
----
-
-## 5. 已知环境事实
-
-| 项 | 值 |
-| --- | --- |
-| 设备 | vivo V2463A，`10AFA8169Z0039G`，Android 15 / API 35，arm64-v8a |
-| page size | **4096**（不是 16KB 设备） |
-| 设备时钟 | 比电脑**快约 2 分钟** |
-| logcat | 必须用 `-b all`；`-c` 清空后短时间内可能为空 |
-| 后台监听 | `detached` 进程活不过一次工具调用 → **操作后立刻 `logcat -d -b all`** |
-| adb 读容器私有目录 | 只有 `run-as com.nextvm.app` 可用；`/sdcard/Android/data/<容器>/` 在 vivo 上被拒 |
-| adb 读 Gaia 沙箱 | **完全被拒**（只能靠容器内探针） |
-
----
-
-## 6. 常用命令
-
-```powershell
-# 安装 guest（p18 起可直读 /sdcard/Download）
-adb shell am broadcast -n com.nextvm.app/.CmdReceiver -a com.nextvm.cmd.INSTALL --es path /sdcard/Download/probe.apk
-
-# 启动（LAUNCHER）
-adb shell am broadcast -n com.nextvm.app/.CmdReceiver -a com.nextvm.cmd.LAUNCH --es pkg com.sandbox.probe
-
-# 启动指定 Activity（容器只解析 LAUNCHER，非 LAUNCHER 页面必须用这条）
-adb shell am broadcast -n com.nextvm.app/.CmdReceiver -a com.nextvm.cmd.LAUNCH_ACTIVITY `
-    --es pkg com.sandbox.probe --es activity com.sandbox.probe.UiTestActivity
-
-# 看命令结果
-adb logcat -d -s CmdReceiver
-
-# 采集（操作后立刻 dump，不要 -c）
-adb logcat -d -b all -v threadtime > probe-reports/dump-$(Get-Date -f HHmmss).txt
-
-# 提取报告
-python tools/probe/extract-report.py probe-reports/dump-*.txt
-
-# Gaia 全流程自动化
-.\tools/device/gaia-test.ps1
-```
+| 长按 ANR | `WindowManager`/`PopupWindow` | 只在 WebView（isolated 进程）出现 |
+| Via 主页源码 | MIME / WebView 库未 patch / 沙箱该放外部存储 | 都不是：变量在「路径落在哪」，机制在 native 侧（见 F1–F6） |
