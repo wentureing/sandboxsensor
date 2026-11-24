@@ -42,6 +42,13 @@ import java.util.concurrent.atomic.AtomicReference;
  *   3. W3 只拿到 ERR_FILE_NOT_FOUND，不知道 android_asset 到底解析到哪
  *      -> v1.10 在 shouldInterceptRequest 里打印实际 URL，并加 W11 主动返回 text/html 做对照
  *
+ * v1.12 追加（W14 已证明"沙箱路径"是唯一变量，本轮分离"路径前缀"与"谁写的文件"）：
+ *   W14  file:///data/local/tmp/wvprobe_tmp.html      <- 非沙箱路径，正常渲染
+ *   W17  file://<filesDir>/pushedup.html              <- 沙箱路径 + 文件由 adb push（排除写入者变量）
+ *   W18  file:///data/user/0/com.nextvm.app/files/... <- 容器私有目录根（不经 virtual/data）
+ *   W19  file:///sdcard/wvprobe19.html                <- 被容器重定向的公共目录
+ *   所有实验的 onPageFinished 都追加 document.contentType，用来直接确认 MIME
+ *
  * 实验矩阵（v1.10）：
  *   W8   webView.getContext() 是谁（packageName / class / identityHash）
  *   W12  webView.getContext().getAssets() 是否等于 this.getAssets()
@@ -88,7 +95,7 @@ public class WebViewProbeActivity extends Activity {
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         status = new TextView(this);
-        status.setText("WebViewProbe v1.10 running...");
+        status.setText("WebViewProbe v1.12 running...");
         root.addView(status, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         setContentView(root);
@@ -113,7 +120,7 @@ public class WebViewProbeActivity extends Activity {
             if (out == null) {
                 File f = new File(getFilesDir(), "wvprobe-result.txt");
                 out = new FileOutputStream(f, false);
-                Log.i(TAG, "# WebViewProbe v1.10, filesDir=" + getFilesDir());
+                Log.i(TAG, "# WebViewProbe v1.12, filesDir=" + getFilesDir());
             }
             out.write((s + "\n").getBytes("UTF-8"));
             out.flush();
@@ -166,6 +173,17 @@ public class WebViewProbeActivity extends Activity {
         // W16 用 .txt 扩展名（内容仍是 HTML），测"是否只看扩展名"
         final File ffTxt = prepareFile("wvprobe_txt.txt", HTML_BODY);
 
+        // W17：沙箱路径 + 文件由 adb push（探针不写），用来排除"文件是谁写的"这个变量。
+        //      探针只观察，不创建；文件不存在则记 about:blank。
+        final File f17 = new File(getFilesDir(), "pushedup.html");
+        rec("PREP W17 pushedup.html -> " + f17.getAbsolutePath()
+                + " exists=" + f17.exists()
+                + " len=" + (f17.exists() ? f17.length() : -1));
+        // W18：容器私有目录根（不经 virtual/data 路径段）
+        final File f18 = prepAt("/data/user/0/com.nextvm.app/files/wvprobe18.html");
+        // W19：被容器重定向的公共目录
+        final File f19 = prepAt("/sdcard/wvprobe19.html");
+
         loadAndCheck("W1", "about:blank", HTML_BODY, false, () ->
             loadAndCheck("W2", ff1 == null ? "about:blank" : "file://" + ff1.getAbsolutePath(),
                     null, false, () ->
@@ -181,7 +199,16 @@ public class WebViewProbeActivity extends Activity {
                             null, false, () ->
                     // W16：沙箱 .txt（内容是 HTML），测"只看扩展名"是否成立
                     loadAndCheck("W16", ffTxt == null ? "about:blank"
-                                    : "file://" + ffTxt.getAbsolutePath(), null, false, () -> {
+                                    : "file://" + ffTxt.getAbsolutePath(), null, false, () ->
+                    // W17：沙箱路径 + 文件由 adb push（探针不写），排除"谁写的文件"这个变量
+                    loadAndCheck("W17", f17 == null || !f17.exists() ? "about:blank"
+                            : "file://" + f17.getAbsolutePath(), null, false, () ->
+                    // W18：容器私有目录根（不经 virtual/data），测是否与 virtual 路径段有关
+                    loadAndCheck("W18", f18 == null ? "about:blank"
+                            : "file://" + f18.getAbsolutePath(), null, false, () ->
+                    // W19：被容器重定向的公共目录，测"重定向路径"的 MIME 是否也不同
+                    loadAndCheck("W19", f19 == null ? "about:blank"
+                            : "file://" + f19.getAbsolutePath(), null, false, () -> {
                                 // W11：强制在 shouldInterceptRequest 里给 text/html
                                 W11_MODE = true;
                                 loadAndCheck("W11", ff1 == null ? "about:blank" : "file://" + ff1.getAbsolutePath(),
@@ -190,7 +217,7 @@ public class WebViewProbeActivity extends Activity {
                                             rec("DONE all experiments (W11 intercepted " + w11InterceptCount + " request(s))");
                                             status.setText("done, see logcat -s WVP");
                                         });
-                            })))))));
+                            }))))))))));
     }
 
     private File prepareFile(String name, String body) {
@@ -206,6 +233,22 @@ public class WebViewProbeActivity extends Activity {
             rec("PREP " + name + " FAIL: " + t);
             return null;
         }
+    }
+
+    /** W18/W19 用：把 HTML 写到指定绝对路径；失败也返回 File，便于后续观察 exists/len */
+    private File prepAt(String absPath) {
+        File f = new File(absPath);
+        try {
+            File dir = f.getParentFile();
+            if (dir != null) dir.mkdirs();
+            FileOutputStream o = new FileOutputStream(f, false);
+            o.write(HTML_BODY.getBytes("UTF-8"));
+            o.close();
+            rec("PREP " + absPath + " OK exists=" + f.exists() + " len=" + f.length());
+        } catch (Throwable t) {
+            rec("PREP " + absPath + " FAIL: " + t.getClass().getSimpleName() + ": " + t.getMessage());
+        }
+        return f;
     }
 
     // ---------------------------------------------------------------- 静态检查
@@ -397,10 +440,12 @@ public class WebViewProbeActivity extends Activity {
 
             @Override
             public void onPageFinished(WebView v, String u) {
+                // v1.12：同时取 document.contentType —— 直接暴露 WebView 判定的 MIME
                 v.evaluateJavascript(
-                        "(document.body && document.body.innerText) || 'EMPTY'",
+                        "JSON.stringify({ct:(document.contentType||''),"
+                                + "body:((document.body && document.body.innerText) || 'EMPTY')})",
                         value -> {
-                            outcome.set("finished body=" + brief(value));
+                            outcome.set("finished " + brief(value));
                             latch.countDown();
                         });
             }
@@ -450,6 +495,8 @@ public class WebViewProbeActivity extends Activity {
         if (s == null) return "null";
         s = s.replace('\n', ' ');
         s = s.replace("\u003C", "<");
-        return s.length() <= 160 ? s : s.substring(0, 160) + "...";
+        // v1.12：上限从 160 提到 300 —— onPageFinished 现在返回 JSON（contentType + body），
+        //        160 会把 contentType 之后的 body 截掉，看不到"是源码还是渲染结果"
+        return s.length() <= 300 ? s : s.substring(0, 300) + "...";
     }
 }
