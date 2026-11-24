@@ -5,6 +5,19 @@
 
 ---
 
+> ## ⚠️ 更正（2026-11-24 18:50，device）
+>
+> 本文标题里的"WebView 修复验证成功"**是错的**。
+>
+> 那次"修复"（23b0538 接线 nsureWebViewResources）导致 **Via 启动循环**
+> （InflateException: layout/p line #48 → TypedValue.assetCookie=-1），
+> 已在 2fc764d 回退。
+>
+> 本文的**网络失败原因调查部分仍然有效**（HTTP 0 = 代理端口用错，7897 应为 12450）。
+> **WebView 部分请只看 docs/计划-WebView修复.md。**
+
+---
+
 ## 一、`HTTP 0` 的真实原因：**不是 GitHub，是本地代理**
 
 ### 1.1 排除"GitHub 限流"
