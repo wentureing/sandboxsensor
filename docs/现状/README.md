@@ -22,7 +22,7 @@
 | `VirtualContext` 路径改写（26 个 override） | ✅ 生效 | 探针 W36：`getFilesDir()` 返回沙箱真路径 |
 | native GOT/PLT patch（被 patch 的 so） | ✅ 生效 | 架构文档 + `NS_HOOK_SYSTEM_LIBS=0` 日志 |
 | **路径重定向规则（guest 进程）** | ✅ **v142 起生效** | 之前 `rules=0`（规则只在主进程注册） |
-| **Java 层文件 I/O 重定向** | ⚠️ **已装但未验证生效** | v141 `RegisterNatives` 成功（`installed=true`），但 W38 写 `/sdcard` 仍失败；v142 补规则后待复测 |
+| **Java 层文件 I/O 重定向** | ✅ **已打通（v141+v142）** | `RegisterNatives` 替换 `libcore.io.Linux.open/access` + guest 进程补注册 11 条规则；W38 写 `/sdcard` 成功且文件落在沙箱，详见 `../输出/记录/记录-Java层路径重定向打通.md` |
 | `/proc/self` spoof、进程名、seccomp | ✅ 生效 | `ensureGuestApplicationBooted`（guest） |
 | `WebViewWarmup`（provider 预热/修复） | ✅ 生效 | guest bind complete 时调度 |
 | v138 进程 Application → guest | ✅ 生效 | 探针 W32：`currentApplication()` 的 class 是 `ProbeApplication` |

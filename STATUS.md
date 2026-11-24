@@ -9,8 +9,9 @@
 ## 0. 一句话现状
 
 容器已能跑 Via 与探针；**WebView 的 `file://` MIME 问题未解决**（Via 主页显示源码）。
-本轮最大进展：查清了**路径转换三层机制**、**注入时机审计**，并完成了
-**Java 层文件 I/O 重定向**的实现（v141 hook + v142 guest 补规则），正在复测。
+本轮最大进展：**Java 层文件 I/O 重定向已打通**（v141 `RegisterNatives` + v142 guest 补注册规则）——
+这是「假路径/路径保真/外部消费者」所有方案的共同地基，之前一直缺。
+同时查清了**路径转换三层机制**与**注入时机审计**。
 
 ---
 
@@ -27,6 +28,7 @@
 | **F7** | 容器**客主进程不装 hook**（P0-3 生效） | logcat `initNativeHooks skipped: container main process` |
 | **F8** | **guest 进程的重定向规则表曾经是空的**（`rules=0`） | `<filesDir>/v141-javaio.log` |
 | **F9** | `RegisterNatives` 替换 `libcore.io.Linux.open/access` **能装成功**（`installed=true`） | 同上 |
+| **F11** | **Java 层路径重定向已打通**：guest 补注册后 `rules=11`，W38 写 `/sdcard` 成功且文件落在沙箱 `.../sdcard/wvprobe_javaio.txt` | breadcrumb `v142-redirect` + W38 |
 | **F10** | v137（包装 `WebViewClient` 补 MIME）**时序上做不到**：`loadUrl` 早于任何视图树扫描 | `installed=0(+132ms) → installed=1(+10s)`、`delegated=0` |
 
 ## 2. 已确认的边界（**不要再重复调查**）
@@ -51,7 +53,7 @@
 | --- | --- |
 | Binder 代理、`VirtualContext` 路径改写、native GOT patch | ✅ 生效 |
 | guest 路径重定向规则 | ✅ **v142 起生效**（之前 `rules=0`） |
-| Java 层文件 I/O 重定向 | ⚠️ 已装（v141），**待复测**（v142 补规则后 W38 是否通过） |
+| Java 层文件 I/O 重定向 | ✅ **已打通（v141+v142）**：W38 写 `/sdcard` 成功、文件落沙箱 |
 | v138 进程 Application → guest | ✅ 生效（W32 的 class 是 `ProbeApplication`） |
 | **WebView `file://` MIME** | ❌ **未解决** |
 | `AntiDetectionEngine` / `IdentitySpoofingEngine` / `FileAccessInterceptor` | ❌ 零调用 |

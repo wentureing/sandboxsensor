@@ -9,9 +9,10 @@
 
 | 优先 | 事项 | 状态 | 文档 |
 | --- | --- | --- | --- |
-| **P0** | **Java 层文件 I/O 重定向**（`RegisterNatives` 替换 `libcore.io.Linux`） | 🔄 已实现 v141（hook 装上）+ v142（guest 补注册规则）**待复测** | `../架构/架构-Java层路径重定向-施工方向与方案.md` |
-| **P1** | **WebView `file://` 的 MIME** | ⛔ 未解决；代读方案有效但注入时机做不到；备选方案寿命短 | `../输出/记录/记录-W2-text-plain机制收敛.md` |
-| **P2** | 补齐注入位置（`setupPathFidelityRedirections` / `registerVirtualSdcard` / `installDeferredProxies` 是否也该在 guest） | 📋 待验证 | `../架构/架构-注入时机审计.md` |
+| ✅ **完成** | **Java 层文件 I/O 重定向**（v141 `RegisterNatives` + v142 guest 补规则） | **已打通**：W38 写 `/sdcard` 成功且落沙箱 | `../输出/记录/记录-Java层路径重定向打通.md` |
+| **P0** | 把重定向扩到 `stat/lstat/readlink/unlink/rename/mkdir` | 📋 待做（`stat` 最常用） | 同上「下一步候选」 |
+| **P1** | 重新评估「假 dataDir 让 WebView 走标准分支」 | 📋 前提已具备（Java 层 + guest 规则都有了） | `../输出/记录/记录-W2-text-plain机制收敛.md` |
+| **P2** | 补齐注入位置（`setupPathFidelityRedirections` / `registerVirtualSdcard` / `installDeferredProxies`） | 📋 待验证 | `../架构/架构-注入时机审计.md` |
 
 ## 二、待执行（按优先级）
 
