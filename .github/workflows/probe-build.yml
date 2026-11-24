@@ -102,12 +102,64 @@ jobs:
             ~/.gradle/wrapper/dists
           key: gradle-home-${{ env.GRADLE_VERSION }}-${{ env.CACHE_EPOCH }}
 
+      # ---------- 固定 debug keystore（与容器同一套，保证 adb install -r 可覆盖） ----------
+      # 背景：探针之前完全没有签名处理，每次构建 AGP 现场生成新 keystore ->
+      #       adb install -r 报 INSTALL_FAILED_UPDATE_INCOMPATIBLE。
+      # 做法与 container-build.yml 一致（参考 C:\Users\86177\Desktop\阅读器开发）：
+      #   1) keystore 放 $GITHUB_WORKSPACE/debug.keystore（绝对路径可控）
+      #   2) 通过环境变量传给 probe/build.gradle.kts 的显式 signingConfigs
+      #   3) 缺 Secret 直接 ::error:: 失败
+      - name: Install fixed debug keystore
+        env:
+          KEYSTORE_B64: ${{ secrets.DEBUG_KEYSTORE_BASE64 }}
+        run: |
+          set -euo pipefail
+          if [ -z "${KEYSTORE_B64:-}" ]; then
+            echo "::error::DEBUG_KEYSTORE_BASE64 未配置 —— 拒绝构建（探针签名会漂移）"
+            exit 1
+          fi
+          KS_PATH="$GITHUB_WORKSPACE/debug.keystore"
+          echo "$KEYSTORE_B64" | base64 -d > "$KS_PATH"
+          chmod 600 "$KS_PATH"
+          echo "keystore written: $KS_PATH ($(wc -c < "$KS_PATH") bytes)"
+          keytool -list -v -keystore "$KS_PATH" \
+            -storepass android -alias androiddebugkey 2>/dev/null \
+            | grep -E "Owner:|SHA256:" || true
+
       - name: Build probe APK
+        env:
+          STORE_FILE_NAME: ${{ github.workspace }}/debug.keystore
+          KEYSTORE_PASSWORD: android
+          STORE_ALIAS: androiddebugkey
+          KEY_PASSWORD: android
         run: |
           echo "ABI=$PROBE_ABI"
           # 用 wrapper 构建：Gradle 发行版落在 ~/.gradle/wrapper/dists（已纳入固定 key 缓存）
           chmod +x ./gradlew
           ./gradlew :probe:assembleDebug -PprobeAbi="$PROBE_ABI" --no-daemon --stacktrace
+
+      # 构建后校验签名，与容器 workflow 同款
+      - name: Verify APK signature matches keystore
+        run: |
+          set -euo pipefail
+          KS_PATH="$GITHUB_WORKSPACE/debug.keystore"
+          APK=$(find probe/build/outputs/apk -name '*.apk' | head -1)
+          echo "APK=$APK"
+          KS_FP=$(keytool -list -v -keystore "$KS_PATH" -storepass android -alias androiddebugkey 2>/dev/null \
+                    | grep 'SHA256:' | head -1 | sed 's/.*SHA256: *//')
+          APKSIGNER=$(find "$ANDROID_SDK_ROOT/build-tools" -name apksigner -type f 2>/dev/null | sort | tail -1)
+          if [ -z "$APKSIGNER" ]; then
+            echo "::warning::apksigner 未找到，跳过签名校验"
+            exit 0
+          fi
+          APK_FP=$("$APKSIGNER" verify --print-certs "$APK" 2>/dev/null \
+                    | grep -i 'SHA-256 digest' | head -1 | sed 's/.*: *//' | tr 'a-f' 'A-F')
+          echo "keystore=$KS_FP"; echo "apk=$APK_FP"
+          if [ "${KS_FP^^}" != "${APK_FP}" ]; then
+            echo "::error::探针签名漂移！"
+            exit 1
+          fi
+          echo "::notice::探针签名一致"
 
       # 产物体面化：不要 app-debug.apk 这种通用名，也不要在 artifact 里带多级目录
       - name: Stage artifact

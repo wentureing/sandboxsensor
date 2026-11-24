@@ -114,32 +114,77 @@ jobs:
 
       # 固定 debug keystore：否则每次构建都重新生成签名，
       # adb install -r 会报 INSTALL_FAILED_UPDATE_INCOMPATIBLE（必须卸载重装，沙箱数据全丢）。
-      # 固定签名：从 Secret 注入固定的 debug.keystore
-      # 背景：Cache debug keystore 从未生效（Post 步骤报 Path Validation Error），
-      # 导致每次构建生成新 keystore -> 签名漂移 -> install -r 必失败。
-      # 详见 docs/records/记录-签名漂移根因-Cache-keystore从未生效.md
+      #
+      # 2026-11-24 重做（参考 C:\Users\86177\Desktop\阅读器开发 的做法）：
+      #   之前把 keystore 写到 "$HOME/.android/debug.keystore"，指望 AGP 的默认 debug 签名去读。
+      #   实测失败：三个 APK 的证书 SHA256 全不同，有效期起点就是构建时刻，说明 AGP 每次
+      #   都现场新建了 keystore —— 因为 AGP 用的是 System.getProperty("user.home")，
+      #   与 shell 的 $HOME 在 CI 里可能不一致，写进去的文件根本没被读到。
+      #
+      #   现在的做法：
+      #     1) keystore 放到 $GITHUB_WORKSPACE/debug.keystore（工作区内，路径绝对可控）
+      #     2) 通过 STORE_FILE_NAME / KEYSTORE_PASSWORD / STORE_ALIAS / KEY_PASSWORD
+      #        环境变量传给 app/build.gradle.kts，由它显式声明 signingConfigs
+      #     3) 缺 Secret 时 ::error:: 直接失败，不再静默产出漂移签名的包
       - name: Install fixed debug keystore
         env:
           KEYSTORE_B64: ${{ secrets.DEBUG_KEYSTORE_BASE64 }}
         run: |
-          if [ -z "$KEYSTORE_B64" ]; then
-            echo "::warning::DEBUG_KEYSTORE_BASE64 未配置，签名将继续漂移"
-            exit 0
+          set -euo pipefail
+          if [ -z "${KEYSTORE_B64:-}" ]; then
+            echo "::error::DEBUG_KEYSTORE_BASE64 未配置 —— 拒绝构建（否则签名会漂移，install -r 必失败）"
+            exit 1
           fi
-          mkdir -p "$HOME/.android"
-          echo "$KEYSTORE_B64" | base64 -d > "$HOME/.android/debug.keystore"
-          chmod 600 "$HOME/.android/debug.keystore"
-          echo "keystore installed: $(wc -c < "$HOME/.android/debug.keystore") bytes"
+          KS_PATH="$GITHUB_WORKSPACE/debug.keystore"
+          echo "$KEYSTORE_B64" | base64 -d > "$KS_PATH"
+          chmod 600 "$KS_PATH"
+          echo "keystore written: $KS_PATH ($(wc -c < "$KS_PATH") bytes)"
+          echo "GITHUB_WORKSPACE=$GITHUB_WORKSPACE"
+          echo "HOME=$HOME"
+          echo "user.home(gradle JVM)=$(java -XshowSettings:properties -version 2>&1 | grep -i 'user.home' || true)"
           # 打印证书指纹，便于跨构建比对（不泄露私钥）
-          keytool -list -v -keystore "$HOME/.android/debug.keystore" \
+          keytool -list -v -keystore "$KS_PATH" \
             -storepass android -alias androiddebugkey 2>/dev/null \
             | grep -E "Owner:|SHA256:" || true
 
       - name: Build container APK
         working-directory: container
+        env:
+          # 传给 app/build.gradle.kts 的显式 signingConfigs（绝对路径，不依赖 AGP 推断）
+          STORE_FILE_NAME: ${{ github.workspace }}/debug.keystore
+          KEYSTORE_PASSWORD: android
+          STORE_ALIAS: androiddebugkey
+          KEY_PASSWORD: android
         run: |
           chmod +x ./gradlew
           ./gradlew ${{ inputs.task || ':app:assembleDebug' }} --no-daemon --stacktrace
+
+      # 构建后校验：APK 的签名证书必须与注入的 keystore 一致。
+      # 这一步是"结构上不可能漂移"的保证 —— 参考阅读器开发的
+      # "Require release keystore" 思路，用失败而不是警告。
+      - name: Verify APK signature matches keystore
+        run: |
+          set -euo pipefail
+          KS_PATH="$GITHUB_WORKSPACE/debug.keystore"
+          APK=$(find container/app/build/outputs/apk -name '*.apk' | head -1)
+          echo "APK=$APK"
+          KS_FP=$(keytool -list -v -keystore "$KS_PATH" -storepass android -alias androiddebugkey 2>/dev/null \
+                    | grep 'SHA256:' | head -1 | sed 's/.*SHA256: *//')
+          echo "keystore SHA256 = $KS_FP"
+          # 用 apksigner（build-tools 自带）读 APK 签名
+          APKSIGNER=$(find "$ANDROID_SDK_ROOT/build-tools" -name apksigner -type f 2>/dev/null | sort | tail -1)
+          if [ -z "$APKSIGNER" ]; then
+            echo "::warning::apksigner 未找到，跳过 APK 签名校验"
+            exit 0
+          fi
+          APK_FP=$("$APKSIGNER" verify --print-certs "$APK" 2>/dev/null \
+                    | grep -i 'SHA-256 digest' | head -1 | sed 's/.*: *//' | tr 'a-f' 'A-F')
+          echo "APK SHA256      = $APK_FP"
+          if [ "${KS_FP^^}" != "${APK_FP}" ]; then
+            echo "::error::签名漂移！keystore=$KS_FP  APK=$APK_FP"
+            exit 1
+          fi
+          echo "::notice::签名一致，install -r 可用"
 
       # P1-2：Robolectric 单元测试（纯 JVM，不需要模拟器）
       # P1-2：纯 JUnit 单测（零下载，秒级）。

@@ -21,7 +21,9 @@ const TOKEN_FILE = path.join(ROOT, 'token.txt');
 const OUT_FILE = path.join(ROOT, 'probe-reports', 'gh-out.json');
 const PROXY = {
   host: process.env.GH_PROXY_HOST || '127.0.0.1',
-  port: Number(process.env.GH_PROXY_PORT || 7897),
+  // 2026-11-24：与 gh-api.mjs 保持一致改为 12450。
+  //   7897 实测 3/3 ECONNRESET（TLS 握手前被断开），12450 3/3 HTTP 200。
+  port: Number(process.env.GH_PROXY_PORT || 12450),
 };
 const OWNER = 'wentureing';
 const REPO = 'sandboxsensor';
