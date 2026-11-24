@@ -54,6 +54,28 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!--
+          WebViewProbeActivity（v1.9+）：用实践证明 WebView 在容器里的行为。
+
+          W0  WebView 能否创建            -> WebView 自己的资源域（0x02）能否解析
+          W1  loadDataWithBaseURL         -> 渲染（不碰文件）
+          W2  file:// + getFilesDir()     -> file:// 读私有目录
+          W3  file:///android_asset/      -> assets（AssetManager 路径）
+          W4  file:// + getDataDir/files  -> dataDir 形式
+          W5  ApplicationInfo.getAllApkPaths()  -> AOSP WebViewFactory 用它加 shared library
+          W6  宿主 getAssets() 里有没有 WebView 资源 -> 验证 addAssetPathAsSharedLibrary 是否生效
+          W7  0x02 域资源能否解析         -> 直接验 popup 崩溃那个 0x20c0006
+
+          不设 LAUNCHER（避免抢 UiTestActivity 的入口），用 CmdReceiver 的
+          LAUNCH_ACTIVITY --es activity com.sandbox.probe.WebViewProbeActivity 启动。
+          同样用 NoActionBar 主题，避免容器里 setDefaultIcon 去 guest Resources 查 0x7f 图标。
+        -->
+        <activity
+            android:name=".WebViewProbeActivity"
+            android:exported="true"
+            android:icon="@android:drawable/sym_def_app_icon"
+            android:theme="@android:style/Theme.Material.NoActionBar" />
     </application>
 
 </manifest>
