@@ -187,6 +187,12 @@ node tools/release/gh-api.mjs "/repos/wentureing/sandboxsensor/actions/runs?per_
 - **版本号递增**：`versionCode = GITHUB_RUN_NUMBER`、`versionName = 1.0.0-<7位sha>`
   递增的 versionCode 配合固定 keystore 才能 `adb install -r` 覆盖
 - **现阶段不做 release 分发包**（`app/build.gradle.kts` 没有 `signingConfigs`，也用不到）
+- **⚠️ 签名固定的验证方法（2026-11-24 发现这个问题从未验证过）**
+  - 连续两次 CI 的 APK 必须用 `apksigner verify --print-certs` 对比证书 SHA-256，**完全一致**才算成功
+  - 本项目的 `Cache debug keystore` **一直没生效**：Post 步骤报
+    `[warning]Path Validation Error: Path(s) ... do(es) not exist`
+    → 每次构建都生成新 keystore → 每次签名不同 → `adb install -r` 必失败
+  - 详见 `docs/records/记录-签名漂移根因-Cache-keystore从未生效.md`
 
 ## 其他约定
 
