@@ -160,17 +160,29 @@ public class WebViewProbeActivity extends Activity {
         File f1 = prepareFile(HTML_NAME, HTML_BODY);
         File f4 = prepareFile(HTML_W4, HTML_BODY);
 
-        // 3) 串联四个加载实验
+        // 3) 串联加载实验
         final File ff1 = f1;
         final File ff4 = f4;
+        // W16 用 .txt 扩展名（内容仍是 HTML），测"是否只看扩展名"
+        final File ffTxt = prepareFile("wvprobe_txt.txt", HTML_BODY);
 
         loadAndCheck("W1", "about:blank", HTML_BODY, false, () ->
             loadAndCheck("W2", ff1 == null ? "about:blank" : "file://" + ff1.getAbsolutePath(),
                     null, false, () ->
                 loadAndCheck("W3", "file:///android_asset/" + HTML_NAME, null, false, () ->
                     loadAndCheck("W4", ff4 == null ? "about:blank" : "file://" + ff4.getAbsolutePath(),
-                            null, false, () -> {
-                                // 4) W11：强制在 shouldInterceptRequest 里给 text/html
+                            null, false, () ->
+                    // W14：/data/local/tmp（容器不该改写的路径），文件由 adb push 准备。
+                    //      能渲染 -> 根因在"沙箱路径"；也失败 -> 根因在更底层。
+                    loadAndCheck("W14", "file:///data/local/tmp/wvprobe_tmp.html", null, false, () ->
+                    // W15：沙箱路径 + ?x=.html，测 Chromium 是否按 URL 末段判扩展名
+                    loadAndCheck("W15", (ff1 == null ? "about:blank"
+                                    : "file://" + ff1.getAbsolutePath() + "?x=.html"),
+                            null, false, () ->
+                    // W16：沙箱 .txt（内容是 HTML），测"只看扩展名"是否成立
+                    loadAndCheck("W16", ffTxt == null ? "about:blank"
+                                    : "file://" + ffTxt.getAbsolutePath(), null, false, () -> {
+                                // W11：强制在 shouldInterceptRequest 里给 text/html
                                 W11_MODE = true;
                                 loadAndCheck("W11", ff1 == null ? "about:blank" : "file://" + ff1.getAbsolutePath(),
                                         null, true, () -> {
@@ -178,7 +190,7 @@ public class WebViewProbeActivity extends Activity {
                                             rec("DONE all experiments (W11 intercepted " + w11InterceptCount + " request(s))");
                                             status.setText("done, see logcat -s WVP");
                                         });
-                            }))));
+                            })))))));
     }
 
     private File prepareFile(String name, String body) {
