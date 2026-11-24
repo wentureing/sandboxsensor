@@ -156,6 +156,58 @@ git -C _ref/ShitJumpingVM diff --stat >> docs/changes/<date>-<task>.actual.diff
 `DiagnosticsSink` 半成品、WebView hook 先加后回退、`CACHE_EPOCH` 基于错误诊断清理缓存。
 **落盘 + 等确认** 是最便宜的纠错点。
 
+## CI 触发：push 即触发两个，**绝不补 dispatch**
+
+**规则（2026-11-24 定，踩过坑）**：
+
+> **一次 `git push` 会自动触发 container + probe 两个 workflow，各一次。**
+> **push 之后不要再 `--dispatch`。** 补 dispatch 会产生同一 commit 的第二个 run，
+> 而两个 workflow 都配了 `concurrency: cancel-in-progress: true`，
+> 结果是**互相取消**，看起来像"CI 故障"。
+
+2026-11-24 的真实事故（`5c1ab5d`）：
+
+```
+#29  build-probe      cancelled  push               ← push 自动触发
+#30  build-probe      cancelled  workflow_dispatch  ← 我又手动补了一次
+#31  build-probe      cancelled  workflow_dispatch  ← 又补一次
+#49  build-container  cancelled  workflow_dispatch
+```
+
+同一个 commit 产生 probe ×3，全部被取消，**一个可用的产物都没有**。
+
+修复后（`6cf199e`，只 push）：
+
+```
+#32  build-probe      in_progress  push
+#50  build-container  in_progress  push
+```
+
+**正好两个，各一个。**
+
+### 历史背景（为什么以前要手动 dispatch）
+
+`container-build.yml` 原来的 `paths` 只有：
+
+```yaml
+paths:
+  - '.github/workflows/container-build.yml'
+```
+
+改容器源码（在独立仓库 `wentureing/ShitJumpingVM`）、改探针、改文档**都不会触发**容器重建，
+所以历史上一直靠手动 `--dispatch`。`probe-build.yml` 的 `paths` 也只有 5 条。
+
+**2026-11-24 已去掉两个 workflow 的 `paths` 过滤** → push 任何文件都触发两个。
+
+### 什么时候才需要手动 dispatch
+
+只有当**容器仓库 push 了但主仓库没有新提交**时（容器代码在另一个 repo，
+主仓库感知不到），才需要一次 `--dispatch container-build.yml main`。
+
+**这种情况一次就够，不要重复调用。**
+
+---
+
 ## CI 触发后不要阻塞等待
 
 **触发构建后直接继续下一步工作，不要轮询/sleep 等结果。**
