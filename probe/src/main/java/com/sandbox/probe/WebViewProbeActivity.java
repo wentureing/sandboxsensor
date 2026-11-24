@@ -113,7 +113,7 @@ public class WebViewProbeActivity extends Activity {
         status = new TextView(this);
         status.setTextSize(13);
         status.setPadding(12, 12, 12, 6);
-        status.setText("WebViewProbe v1.20 —— 打开即自动跑全部 W 实验，结果实时显示在下方");
+        status.setText("WebViewProbe v1.21 —— 打开即自动跑全部 W 实验，结果实时显示在下方");
         root.addView(status, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
@@ -291,6 +291,8 @@ public class WebViewProbeActivity extends Activity {
         final File ff4 = f4;
         // v1.20：确认 WebView 视角的 dataDir 与 W2 文件路径的归属关系
         probeDataDir(ff1 == null ? null : ff1.getAbsolutePath());
+        // v1.21：假 dataDir 是否生效 + Java 层能否用它读文件（v139 的两个判据）
+        probeDataDirUsability();
         // v1.16：直接问 WebView 内部的 AndroidProtocolHandler，把「W2 为什么 text/plain」定死
         probeProtocolHandler(ff1);
         // W16 用 .txt 扩展名（内容仍是 HTML），测"是否只看扩展名"
@@ -1170,6 +1172,57 @@ public class WebViewProbeActivity extends Activity {
             }
         }
         return null;
+    }
+
+    /**
+     * W37：假 dataDir 的「生效性」与「可用性」。
+     *
+     * 背景：v139 把 LoadedApk.mApplicationInfo.dataDir 改成 guest 官方路径
+     * (/data/user/0/<guest>)，但 VirtualContext.getApplicationInfo() 会
+     * `super.getApplicationInfo().apply { dataDir = appDir }` —— 返回的是同一个对象、
+     * 原地改回真实沙箱。所以：
+     *   ① W37 看到 dataDir 仍是沙箱 -> v139 被 VirtualContext 覆盖（需改 VirtualContext）
+     *   ② 看到 /data/user/0/com.sandbox.probe -> v139 生效
+     * 同时用 dataDir 拼路径做一次 Java 层读写，评估「framework 内部按 dataDir 读文件」是否失败。
+     */
+    private void probeDataDirUsability() {
+        try {
+            String dataDir = getApplicationInfo().dataDir;
+            rec("W37 getApplicationInfo().dataDir = " + dataDir);
+            rec("W37 仍是沙箱路径（说明被 VirtualContext 覆盖）= "
+                    + (dataDir != null && dataDir.startsWith("/data/user/0/com.nextvm.app/")));
+            rec("W37 是 guest 官方路径（说明 v139 生效）= "
+                    + (dataDir != null && dataDir.startsWith("/data/user/0/com.sandbox.probe")));
+            rec("W37 exists(dataDir) = "
+                    + (dataDir != null && new File(dataDir).exists()));
+
+            File probe = dataDir == null ? null
+                    : new File(dataDir, "wvprobe_datadir_probe.txt");
+            if (probe != null) {
+                try {
+                    FileOutputStream o = new FileOutputStream(probe, false);
+                    o.write("ok".getBytes("UTF-8"));
+                    o.close();
+                    rec("W37 Java 写 via dataDir OK -> " + probe.getAbsolutePath());
+                } catch (Throwable t) {
+                    rec("W37 Java 写 via dataDir FAIL: " + t.getClass().getSimpleName()
+                            + ": " + t.getMessage());
+                }
+            }
+
+            File g = new File(getFilesDir(), "wvprobe_filesdir_probe.txt");
+            try {
+                FileOutputStream o = new FileOutputStream(g, false);
+                o.write("ok".getBytes("UTF-8"));
+                o.close();
+                rec("W37 Java 写 via getFilesDir OK");
+            } catch (Throwable t) {
+                rec("W37 Java 写 via getFilesDir FAIL: " + t.getClass().getSimpleName()
+                        + ": " + t.getMessage());
+            }
+        } catch (Throwable t) {
+            rec("W37 FAIL: " + t.getClass().getSimpleName() + ": " + t.getMessage());
+        }
     }
 
     private static String brief(String s) {
