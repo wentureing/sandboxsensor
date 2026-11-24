@@ -200,11 +200,24 @@ jobs:
           set +e
           ./gradlew :core:sandbox:testDebugUnitTest --no-daemon > /tmp/unit.log 2>&1
           rc=$?
+          # 依赖下载偶发失败时重试一次。实测过 CI #46：
+          #   > Could not download nativeruntime-dist-compat-1.0.16.jar
+          #     (org.robolectric:nativeruntime-dist-compat:1.0.16)
+          #   > Could not get resource 'https://repo.maven.apache.org/maven2/...'
+          # 该 artifact 在 Maven Central 确实存在（2024-10-22 发布），是网络问题。
+          # gradle.properties 里已配 http 超时 + repository max.retries=6，
+          # 这里再加一层进程级重试，覆盖 Gradle 内置重试也放弃的情况。
+          if [ $rc -ne 0 ] && grep -qE "Could not download|Could not get resource|Connection timed out|Read timed out" /tmp/unit.log; then
+            echo "::warning::依赖下载失败，15s 后重试一次"
+            sleep 15
+            ./gradlew :core:sandbox:testDebugUnitTest --no-daemon > /tmp/unit.log 2>&1
+            rc=$?
+          fi
           set -e
           echo "=== 任务/结果摘要 ==="
           grep -E "^> Task :core:sandbox:test|FAILED|BUILD |tests? completed|error:" /tmp/unit.log | head -n 40 || echo "none"
           echo "=== 失败行（仅错误摘要）==="
-          grep -E "FAILED|AssertionError|Caused by:|Exception|error:" /tmp/unit.log | head -n 20 || echo "none"
+          grep -E "FAILED|AssertionError|Caused by:|Exception|error:|Could not download" /tmp/unit.log | head -n 20 || echo "none"
           echo "=== 末尾 15 行 ==="
           tail -n 15 /tmp/unit.log
           exit $rc
