@@ -16,7 +16,7 @@ import tls from 'node:tls';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const TOKEN_FILE = path.join(ROOT, 'token.txt');
 const OUT_FILE = path.join(ROOT, 'probe-reports', 'gh-out.json');
 const PROXY = {
