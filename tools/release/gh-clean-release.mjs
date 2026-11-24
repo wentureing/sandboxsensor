@@ -35,10 +35,16 @@ for (let i = 0; i < argv.length; i++) {
   if (argv[i] === '--keep' && argv[i + 1]) KEEP.push(argv[++i]);
 }
 
+// 按行读 token（token.txt 里可能有多个 PAT，见 gh-api.mjs 的完整说明）。
+// 之前用 readFileSync(...).trim()，.trim() 不去中间换行，
+// 用户加第二行后 Authorization 会变成 "Bearer <t1>\n<t2>"，认证必然失败。
 function token() {
-  const t = fs.readFileSync(TOKEN_FILE, 'utf8').trim();
-  if (!t) throw new Error('token.txt is empty');
-  return t;
+  const lines = fs.readFileSync(TOKEN_FILE, 'utf8')
+    .split(/\r?\n/)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0 && !s.startsWith('#'));
+  if (lines.length === 0) throw new Error('token.txt has no token');
+  return lines[0];     // 清理 Release 属于常规 API，用第 1 行
 }
 
 function decodeChunked(buf) {

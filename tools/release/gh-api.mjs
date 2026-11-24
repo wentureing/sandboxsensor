@@ -24,10 +24,48 @@ const PROXY = {
   port: Number(process.env.GH_PROXY_PORT || 12450),
 };
 
-function token() {
-  const t = fs.readFileSync(TOKEN_FILE, 'utf8').trim();
-  if (!t) throw new Error('token.txt is empty');
-  return t;
+/**
+ * token.txt 的存储约定（2026-11-24 定）
+ *
+ * 每行一个 PAT，按"用途"分配行序（1-based），空行和 # 开头的注释行会被跳过：
+ *
+ *   第 1 行：默认 token —— 常规 API
+ *            列 runs / 查 release / dispatch workflow / 删 cache / 查元数据
+ *   第 2 行：内容读取 token —— 大响应
+ *            下日志包（--logs）、下 Release asset（--asset）
+ *            和默认 token 分开，两个 PAT 各 5000/h，互不挤占配额
+ *
+ * 为什么必须按行读：之前实现是 readFileSync(...).trim()，
+ * .trim() 只去首尾空白，中间的换行会保留 —— 用户加第二行之后，
+ * Authorization 头会变成 "Bearer <token1>\n<token2>"，认证必然失败。
+ *
+ * 覆盖方式：
+ *   GH_TOKEN_N        直接用第 N 行（1-based），优先于用途映射
+ *   GH_TOKEN_PURPOSE  'default' | 'content'，默认 'default'
+ */
+function tokenLines() {
+  const raw = fs.readFileSync(TOKEN_FILE, 'utf8');
+  return raw
+    .split(/\r?\n/)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0 && !s.startsWith('#'));
+}
+
+function token(purpose = process.env.GH_TOKEN_PURPOSE || 'default') {
+  const lines = tokenLines();
+  if (lines.length === 0) throw new Error('token.txt has no token (empty or all comments)');
+
+  const forced = Number(process.env.GH_TOKEN_N || 0);
+  if (forced > 0) {
+    const t = lines[forced - 1];
+    if (!t) throw new Error(`GH_TOKEN_N=${forced} but token.txt only has ${lines.length} tokens`);
+    return t;
+  }
+
+  // 用途 -> 行索引（0-based）。缺行时回退到第 1 行，保证单 token 也能用。
+  const byPurpose = { default: 0, content: 1 };
+  const idx = Object.prototype.hasOwnProperty.call(byPurpose, purpose) ? byPurpose[purpose] : 0;
+  return lines[Math.min(idx, lines.length - 1)];
 }
 
 function decodeChunked(buf) {
@@ -111,11 +149,11 @@ function request(host, pathname, extraHeaders = {}, method = 'GET', body = null)
   });
 }
 
-async function apiGet(pathname, extraHeaders = {}) {
+async function apiGet(pathname, extraHeaders = {}, purpose = 'default') {
   const host = 'api.github.com';
   let p = pathname;
   for (let hop = 0; hop < 4; hop++) {
-    const r = await request(host, p, { Authorization: `Bearer ${token()}`, ...extraHeaders });
+    const r = await request(host, p, { Authorization: `Bearer ${token(purpose)}`, ...extraHeaders });
     if (r.status >= 300 && r.status < 400 && r.location) {
       // 日志下载会跳到 S3 预签名 URL：此时不能再带 Authorization
       if (r.location.startsWith('https://')) {
@@ -185,7 +223,7 @@ if (args[0] === '--dispatch') {
   }
   const r = await apiGet(`/repos/wentureing/sandboxsensor/releases/assets/${asset.id}`, {
     Accept: 'application/octet-stream',
-  });
+  }, 'content');
   if (r.status !== 200) {
     console.error(`download failed: HTTP ${r.status}`);
     process.exit(1);
@@ -196,7 +234,7 @@ if (args[0] === '--dispatch') {
 } else if (args[0] === '--logs') {
   const runId = args[1];
   const out = args[2] || `probe-reports/run-${runId}-logs.zip`;
-  const r = await apiGet(`/repos/wentureing/sandboxsensor/actions/runs/${runId}/logs`);
+  const r = await apiGet(`/repos/wentureing/sandboxsensor/actions/runs/${runId}/logs`, {}, 'content');
   if (r.status !== 200) {
     console.error(`logs download failed: HTTP ${r.status}`);
     process.exit(1);
