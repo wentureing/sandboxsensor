@@ -1,0 +1,139 @@
+name: module-test
+
+# 模块级单元测试（2026-11-24 新增，用户要求）。
+#
+# 目的：**每个拆分出的小模块都能独立测试**，不依赖整体能运行。
+# 只跑 JVM 单测（不构建 APK、不需要设备），因此比 container-build 快得多。
+#
+# 触发：只有 workflow_dispatch（与其它编译 workflow 一致：一次一个，明确指定）
+#   node tools/release/gh-api.mjs --dispatch module-test.yml main
+#
+# 约定：**拆出新模块时，同一个提交里加一个 <Module>Test.kt**；
+#       并把模块名加到下面的默认 modules 列表里。
+
+on:
+  workflow_dispatch:
+    inputs:
+      repo:
+        description: '容器源码仓库'
+        default: 'wentureing/ShitJumpingVM'
+      ref:
+        description: '分支 / tag / SHA'
+        default: 'main'
+      modules:
+        description: '要测试的 Gradle 模块（空格分隔）'
+        default: ':core:virtualization :core:sandbox'
+
+permissions:
+  contents: read
+  checks: write          # dorny/test-reporter 需要创建 check run
+
+concurrency:
+  group: module-test-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  ANDROID_SDK_ROOT: ${{ github.workspace }}/.android-sdk
+  ANDROID_HOME: ${{ github.workspace }}/.android-sdk
+  SDK_PLATFORM: 'android-35'
+  BUILD_TOOLS: '35.0.0'
+  NDK_VERSION: '27.1.12297006'
+  CMAKE_VERSION: '3.22.1'
+  CACHE_EPOCH: 'v2'
+
+jobs:
+  module-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout container source
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.repo || 'wentureing/ShitJumpingVM' }}
+          ref: ${{ inputs.ref || 'main' }}
+          path: container
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Show target modules
+        run: |
+          echo "repo=${{ inputs.repo || 'wentureing/ShitJumpingVM' }}"
+          echo "ref=${{ inputs.ref || 'main' }}"
+          echo "modules=${{ inputs.modules || ':core:virtualization :core:sandbox' }}"
+
+      # SDK 缓存与 container-build 共用同一套 key（避免重复下载 ~780MB）
+      - name: Cache Android SDK (shared with container build)
+        id: sdk-cache
+        uses: actions/cache@v4
+        with:
+          path: .android-sdk
+          key: sdk-${{ env.SDK_PLATFORM }}-bt${{ env.BUILD_TOOLS }}-ndk${{ env.NDK_VERSION }}-cmake${{ env.CMAKE_VERSION }}-${{ env.CACHE_EPOCH }}
+          restore-keys: |
+            sdk-${{ env.SDK_PLATFORM }}-bt${{ env.BUILD_TOOLS }}-ndk${{ env.NDK_VERSION }}-cmake${{ env.CMAKE_VERSION }}-
+
+      - name: Install Android SDK components
+        if: steps.sdk-cache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          SDKMAN="$(ls -1 /usr/local/lib/android/sdk/cmdline-tools/*/bin/sdkmanager 2>/dev/null | head -n1 || true)"
+          if [ -z "${SDKMAN:-}" ] || [ ! -x "$SDKMAN" ]; then
+            SDKMAN="$(command -v sdkmanager || true)"
+          fi
+          if [ -z "${SDKMAN:-}" ]; then
+            echo "::error::sdkmanager not found on runner"; exit 1
+          fi
+          mkdir -p "$ANDROID_SDK_ROOT"
+          yes | "$SDKMAN" --sdk_root="$ANDROID_SDK_ROOT" --licenses > /dev/null 2>&1 || true
+          "$SDKMAN" --sdk_root="$ANDROID_SDK_ROOT" --install \
+            "platforms;${SDK_PLATFORM}" \
+            "build-tools;${BUILD_TOOLS}" \
+            "platform-tools" \
+            "ndk;${NDK_VERSION}" \
+            "cmake;${CMAKE_VERSION}"
+
+      - name: Setup JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Cache Gradle home
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${Runner.OS}-${{ hashFiles('container/gradle/libs.versions.toml') }}-${{ env.CACHE_EPOCH }}
+          restore-keys: |
+            gradle-${Runner.OS}-${{ env.CACHE_EPOCH }}-
+
+      - name: Run module unit tests
+        working-directory: container
+        run: |
+          set -euo pipefail
+          chmod +x gradlew
+          MODULES="${{ inputs.modules || ':core:virtualization :core:sandbox' }}"
+          TASKS=""
+          for m in $MODULES; do
+            TASKS="$TASKS ${m}:testDebugUnitTest"
+          done
+          echo "Running:$TASKS"
+          ./gradlew --no-daemon --stacktrace $TASKS
+
+      - name: Publish test report
+        if: always()
+        uses: dorny/test-reporter@v1
+        with:
+          name: module-tests
+          path: 'container/**/build/test-results/testDebugUnitTest/*.xml'
+          reporter: java-junit
+          fail-on-error: false
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: module-test-results
+          path: 'container/**/build/reports/tests/testDebugUnitTest/**'
+          if-no-files-found: ignore
