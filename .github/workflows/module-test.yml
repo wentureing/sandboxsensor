@@ -39,6 +39,8 @@ env:
   BUILD_TOOLS: '35.0.0'
   NDK_VERSION: '27.1.12297006'
   CMAKE_VERSION: '3.22.1'
+  # 与 container-build / probe-build 保持一致，便于复用同一份 Gradle 缓存
+  GRADLE_VERSION: '8.9'
   CACHE_EPOCH: 'v2'
 
 jobs:
@@ -104,9 +106,13 @@ jobs:
           path: |
             ~/.gradle/caches
             ~/.gradle/wrapper
-          key: gradle-${Runner.OS}-${{ hashFiles('container/gradle/libs.versions.toml') }}-${{ env.CACHE_EPOCH }}
+          # 注意：必须是 ${{ runner.os }}（表达式），不能写 ${Runner.OS}（shell 语法，
+          # 在 key 字段里不会被展开 -> 变成字面量 -> 缓存永远 miss，实测踩过）。
+          key: gradle-home-${{ env.GRADLE_VERSION }}-libs-${{ hashFiles('container/gradle/libs.versions.toml') }}-${{ env.CACHE_EPOCH }}
           restore-keys: |
-            gradle-${Runner.OS}-${{ env.CACHE_EPOCH }}-
+            gradle-home-${{ env.GRADLE_VERSION }}-libs-${{ env.CACHE_EPOCH }}-
+            gradle-home-${{ env.GRADLE_VERSION }}-${{ env.CACHE_EPOCH }}
+            gradle-home-${{ env.GRADLE_VERSION }}-
 
       - name: Run module unit tests
         working-directory: container
