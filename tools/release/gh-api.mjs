@@ -80,11 +80,25 @@ function request(host, pathname, extraHeaders = {}, method = 'GET', body = null)
         const loc = (head.match(/^location:\s*(.+)$/im) || [, ''])[1].trim();
         resolve({ status, location: loc, body });
       });
-      s.on('error', reject);
-      s.setTimeout(30000, () => { s.destroy(); reject(new Error('tls timeout')); });
+      s.on('error', (e) => {
+        console.error(`[tls->github] ${host}${pathname}: ${e.code || ''} ${e.message}`);
+        reject(e);
+      });
+      s.setTimeout(30000, () => {
+        console.error(`[tls timeout 30s] ${host}${pathname}`);
+        s.destroy();
+        reject(new Error('tls timeout'));
+      });
     });
-    connectReq.on('error', reject);
-    connectReq.on('timeout', () => { connectReq.destroy(); reject(new Error('proxy timeout')); });
+    connectReq.on('error', (e) => {
+      console.error(`[connect->proxy] ${PROXY.host}:${PROXY.port}: ${e.code || ''} ${e.message}`);
+      reject(e);
+    });
+    connectReq.on('timeout', () => {
+      console.error(`[proxy timeout 10s] ${PROXY.host}:${PROXY.port}`);
+      connectReq.destroy();
+      reject(new Error('proxy timeout'));
+    });
     connectReq.end();
   });
 }
