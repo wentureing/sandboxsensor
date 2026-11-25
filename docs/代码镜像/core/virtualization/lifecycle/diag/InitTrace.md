@@ -33,7 +33,7 @@
 | `parseMethods` | `(String): Map<Int,String>` | **纯函数**：`*methods` 段 `hexId\tclass\tmethod` → `id -> "class.method"` |
 | `isSlow` / `u32` | `(ByteArray, Int)` | **纯函数**：块头校验 / 小端 u32 |
 | `matchesAny` | `(name, keys)` | **纯函数**：方法名含任一关注前缀 |
-| `collectRecords` | `(data, startOff, recSize, methods, keys, sampled)` | **纯函数**：按固定记录大小遍历，产出 `t2=.. tid=.. name`；`sampled=false` 跳过 `mid & 1` 的退出记录 |
+| `collectRecords` | `(data, startOff, recSize, methods, keys, sampled)` | **纯函数**：按固定记录大小遍历，产出 `t2=.. tid=.. name`；`sampled=false` 跳过 `mid & 1` 的退出记录；**`recSize <= 0` 立即返回**（否则 `off += 0` 死循环） |
 
 ## 偏差登记
 
@@ -52,3 +52,10 @@
 4. **`mid & -4`** 取方法 id（低 2 位是标志位），不要改成 `mid` 本身。
 5. **过滤跑在后台线程**（`v155-trace-filter` 等），不能在主线程做（读 64 MB）。
 6. 本对象持有跨调用的 `@Volatile` 状态（4 个布尔），**每个进程只有一份**；多实例不适用（与容器多实例暂停一致）。
+7. **trace 字节布局**（写测试/解析时最容易错的地方）：
+   ```
+   文本头（"ART SLOW v3" + *methods + ...）→ "*end\n" → 魔数 "SLOW"(4 字节)
+     → 块头 28 字节（recSize 在块头偏移 12，即 blobOff+16）→ 14 字节记录 × N
+   ```
+   记录起点 = `blobOff + 32`（4 + 28）。把块头当 32 字节或把 recSize 写到偏移 16，
+   会让记录起点错位、甚至 recSize 读成 0 → `collectRecords` 死循环（2026-11-25 实测 CI 卡 8 分钟）。
