@@ -93,14 +93,19 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      # ---------- 缓存 2：Gradle home（固定 key） ----------
+      # ---------- 缓存 2：Gradle home（与 container/module-test 统一 key） ----------
+      # 统一带 libs.versions.toml hash：复用已下载依赖（含 junit），规避 Maven Central 429。
       - name: Cache Gradle home (fixed key)
+        id: gradle-cache
         uses: actions/cache@v4
         with:
           path: |
             ~/.gradle/caches
             ~/.gradle/wrapper/dists
-          key: gradle-home-${{ env.GRADLE_VERSION }}-${{ env.CACHE_EPOCH }}
+          key: gradle-home-${{ env.GRADLE_VERSION }}-libs-${{ hashFiles('probe/gradle/libs.versions.toml', 'gradle/libs.versions.toml') }}-${{ env.CACHE_EPOCH }}
+          restore-keys: |
+            gradle-home-${{ env.GRADLE_VERSION }}-libs-
+            gradle-home-${{ env.GRADLE_VERSION }}-
 
       # ---------- 固定 debug keystore（与容器同一套，保证 adb install -r 可覆盖） ----------
       # 背景：探针之前完全没有签名处理，每次构建 AGP 现场生成新 keystore ->

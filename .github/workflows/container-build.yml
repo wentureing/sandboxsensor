@@ -107,12 +107,37 @@ jobs:
           java-version: '17'
 
       - name: Cache Gradle home (fixed key, shared with probe)
+        id: gradle-cache
         uses: actions/cache@v4
         with:
           path: |
             ~/.gradle/caches
             ~/.gradle/wrapper/dists
-          key: gradle-home-${{ env.GRADLE_VERSION }}-${{ env.CACHE_EPOCH }}
+          # key 与 module-test.yml **统一**：带 libs.versions.toml 的 hash。
+          # 目的：container-build 直接复用 module-test 已下载好的依赖（含 junit 等 test 依赖），
+          # 避免 Maven Central 429（实测 junit:junit:4.13.2 POM 被限流）。
+          # hashFiles 让 libs 变更（如 junit 升版）时自然失效。
+          key: gradle-home-${{ env.GRADLE_VERSION }}-libs-${{ hashFiles('container/gradle/libs.versions.toml') }}-${{ env.CACHE_EPOCH }}
+          restore-keys: |
+            gradle-home-${{ env.GRADLE_VERSION }}-libs-
+            gradle-home-${{ env.GRADLE_VERSION }}-
+
+      # 测试依赖预热（junit 等）。
+      # 实测 Maven Central 会对 runner 返回 429 Too Many Requests：
+      #   Could not get resource '.../junit/junit/4.13.2/junit-4.13.2.pom'
+      #       Received status code 429 from server: Too Many Requests
+      # 缓存命中时依赖在 ~/.gradle/caches 里，不会联网；只在**缓存未命中**时预热一次，
+      # 把 junit/hamcrest 等 test 依赖落进缓存，后续构建直接复用。
+      # 失败不阻断（单测阶段还有一次带 429 识别的重试）。
+      - name: Warm up test dependencies (junit etc.)
+        if: steps.gradle-cache.outputs.cache-hit != 'true'
+        working-directory: container
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          ./gradlew :core:sandbox:dependencies \
+            --configuration debugUnitTestRuntimeClasspath --no-daemon 2>&1 | tail -n 30
+          ./gradlew :core:sandbox:compileDebugUnitTestKotlin --no-daemon 2>&1 | tail -n 20
 
       # 固定 debug keystore：否则每次构建都重新生成签名，
       # adb install -r 会报 INSTALL_FAILED_UPDATE_INCOMPATIBLE（必须卸载重装，沙箱数据全丢）。
