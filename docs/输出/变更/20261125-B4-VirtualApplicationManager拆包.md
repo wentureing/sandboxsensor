@@ -74,3 +74,14 @@ git -C _ref/ShitJumpingVM branch -D split/b4-diag-dump
 | B4-2 | `dumpRealMaps`（378 行）+ `RealSnap` 相关 | 依赖快照类型，需一并搬 |
 | B4-3 | plugin / login / autofill / auth-intent 探针（≈1 400 行） | 需参数化 `application`/`activity` |
 | B4-4 | 启动链：`bindApplication` / `createApplication` / `initContentProviders` | 最高风险，先补 breadcrumb 契约测试 |
+
+## 九、实际结果（已合并 + 真机验证）
+
+| 项 | 结果 |
+| --- | --- |
+| CI | `module-test :core:virtualization` **成功**（`45604572400`；期间修过一处测试断言：`le32` 读 4 字节，我最初按 2 字节写） |
+| 合并 | `--no-ff` → `baseline-v150 @ 55f7a24` |
+| 容器包 | `container-shitjumpingvm-c5ab1cb.apk`（`build-container` `45607135986` 成功，**发包已前置到单测之前**） |
+| 安装 | 干净安装 `versionName=1.0.0-c5ab1cb` / `versionCode=111`；`MANAGE_EXTERNAL_STORAGE` 已恢复 |
+| **真机验证** | 探针 round 跑完：`suite=round`、`entries=94`（ok 53 / fail 2 / skipped 39）；**`stackdump-5993.log` 生成 80 KB**，首行为 `==== t+0.3s ====` + `main looper queue:` + 反射字段 —— 与拆分前格式一致，证明 `GuestMemoryDump.dumpGuestStacks` 在容器内正常工作 |
+| 未回归 | 2 个 fail 仍是 `J26/J27`（字面量宿主路径 + `javaIo=0`，已知限制） |
