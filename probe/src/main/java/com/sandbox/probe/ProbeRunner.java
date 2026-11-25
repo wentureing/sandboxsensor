@@ -57,6 +57,7 @@ public final class ProbeRunner {
         probeCrossPkg();   // P13-P16  跨包可见性 / 逃逸面
         probeSysProps();   // P17-P19  JVM 系统属性
         probeFd();         // P20-P21  fd 视图（已打开 fd 的真实路径）
+        probeFs();         // F01-F08  文件系统读写能力（验 mkdir/opendir/rename/unlink 重定向）
         probeMount();      // P22-P23  mountinfo
         probeUiEntries();  // P24-P27  uiprobe（PopupWindow / 子窗口，来自 UiProbe）
         probeNative();
@@ -519,6 +520,84 @@ public final class ProbeRunner {
                 }
             }
             return sb.toString();
+        });
+    }
+
+    /**
+     * F01-F08：文件系统读写能力。
+     *
+     * 覆盖容器 path-redirection 必须处理的四类操作：
+     *   mkdir（目录创建）/ opendir（目录列举）/ rename（重命名）/ unlink（删除）。
+     * 前三条任一缺失 -> 应用"写了却看不到"；unlink 缺失 -> 删到宿主真实文件。
+     *
+     * 两个根同时测：
+     *   sandboxRoot = getExternalFilesDir()            期望落在沙箱
+     *   hostRoot    = .../Android/data/<getOpPackageName>/files  期望也被兜底重定向
+     */
+    private void probeFs() {
+        File sandboxRoot = ctx.getExternalFilesDir("fsprobe");
+        String opPkg = ctx.getOpPackageName();
+        File hostRoot = new File(
+                android.os.Environment.getExternalStorageDirectory(),
+                "Android/data/" + opPkg + "/files/fsprobe");
+
+        put("F01", "fs", "sandboxRoot path", () ->
+                sandboxRoot == null ? "null" : sandboxRoot.getAbsolutePath());
+        put("F02", "fs", "hostRoot path", () -> hostRoot.getAbsolutePath());
+
+        put("F03", "fs", "mkdir vs mkdirs", () -> {
+            String r1 = sandboxRoot == null ? "skip" : String.valueOf(sandboxRoot.mkdir());
+            String r2 = sandboxRoot == null ? "skip" : String.valueOf(sandboxRoot.mkdirs());
+            return "mkdir=" + r1 + " mkdirs=" + r2 + " exists="
+                    + (sandboxRoot != null && sandboxRoot.isDirectory());
+        });
+
+        put("F04", "fs", "write+read", () -> {
+            if (sandboxRoot == null) return "skip";
+            sandboxRoot.mkdirs();
+            File f = new File(sandboxRoot, "a.txt");
+            try (java.io.FileOutputStream out = new java.io.FileOutputStream(f)) {
+                out.write("hello-fsprobe".getBytes("UTF-8"));
+            }
+            String back;
+            try (java.io.FileInputStream in = new java.io.FileInputStream(f)) {
+                byte[] buf = new byte[64];
+                int n = in.read(buf);
+                back = n <= 0 ? "" : new String(buf, 0, n, "UTF-8");
+            }
+            return "len=" + f.length() + " content=" + back;
+        });
+
+        put("F05", "fs", "listFiles sees it", () -> {
+            if (sandboxRoot == null) return "skip";
+            String[] names = sandboxRoot.list();
+            return "names=" + (names == null ? "null" : java.util.Arrays.toString(names));
+        });
+
+        put("F06", "fs", "renameTo", () -> {
+            if (sandboxRoot == null) return "skip";
+            File a = new File(sandboxRoot, "a.txt");
+            File b = new File(sandboxRoot, "b.txt");
+            boolean ok = a.renameTo(b);
+            String[] names = sandboxRoot.list();
+            return "ok=" + ok + " aExists=" + a.exists() + " bExists=" + b.exists()
+                    + " names=" + (names == null ? "null" : java.util.Arrays.toString(names));
+        });
+
+        put("F07", "fs", "delete", () -> {
+            if (sandboxRoot == null) return "skip";
+            File b = new File(sandboxRoot, "b.txt");
+            boolean ok = b.delete();
+            return "deleted=" + ok + " stillExists=" + b.exists();
+        });
+
+        put("F08", "fs", "hostRoot mkdir probe", () -> {
+            // 走"宿主形态"的路径：若容器兜底，应被重定向到沙箱；若否，会真的建在宿主
+            boolean made = hostRoot.exists() || hostRoot.mkdirs();
+            String[] names = hostRoot.list();
+            return "path=" + hostRoot.getAbsolutePath()
+                    + " made=" + made
+                    + " list=" + (names == null ? "null" : java.util.Arrays.toString(names));
         });
     }
 
