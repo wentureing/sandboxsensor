@@ -1,0 +1,22 @@
+# guest 生命周期 golden（baseline-v150 干净安装，首次启动）
+#
+# 来源：容器 baseline-v150 @ 758fda6（254324b + 诊断层 + guest 侧 Recorder）
+# 实例：mark.via_1795576024771（干净安装后首次启动）
+# 采集：adb exec-out run-as com.nextvm.app cat <instance>/files/checks.log
+#
+# 意义：这是「容器启动编排」的标准记录。用 Android 官方 ActivityLifecycleCallbacks 旁听，
+#       零侵入（不改容器逻辑）。
+#
+# 断言基准（后续对比用）：
+#   1) recorder_installed 必须最先出现（说明 guest 进程装上了 Recorder）
+#   2) pre_created 必须晚于容器的 STEP 0-5（容器编排要先完成）
+#   3) 顺序固定：pre_created -> created -> pre_started -> started -> pre_resumed -> resumed
+#
+# 设备：10AFA8169Z0039G
+S lifecycle recorder_installed
+S lifecycle pre_created:mark.via.Shell
+S lifecycle created:mark.via.Shell
+S lifecycle pre_started:mark.via.Shell
+S lifecycle started:mark.via.Shell
+S lifecycle pre_resumed:mark.via.Shell
+S lifecycle resumed:mark.via.Shell
