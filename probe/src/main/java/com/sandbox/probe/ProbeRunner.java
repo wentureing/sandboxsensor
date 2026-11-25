@@ -923,6 +923,11 @@ public final class ProbeRunner {
                 final String id = parts[0];
                 final String status = parts[1];
                 final String value = parts[2];
+                // native 结果绕过 put()，必须在这里也做套件过滤（N* / P28.sdcard_write 等）
+                if (!suite.enabled(id)) {
+                    putSkipped(id, "native", id);
+                    continue;
+                }
                 JSONObject o = new JSONObject();
                 o.put("id", id);
                 o.put("group", "native");
