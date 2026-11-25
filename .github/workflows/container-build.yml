@@ -200,6 +200,42 @@ jobs:
       #   - 本步骤只跑 :core:sandbox 的快速单测（约 10-20s），作为「构建门禁」；
       #   - 全模块单测（含 :core:virtualization 等）由独立 workflow
       #     `module-test.yml` 负责，两者**互不干扰**（不同 workflow / 不同 concurrency group）。
+      # ===== 产物先行（2026-11-25 用户要求）=====
+      # 发包放在单元测试**之前**：单测失败常常只是**依赖下载限流**（实测 Maven Central 429
+      # Too Many Requests），与产物质量无关；此时产物仍应可下载使用。
+      # 单测失败**仍会让 job 变红**（保留信号），但不再阻断产物发布。
+      # 产物体面化：container-<repo>-<sha>.apk，artifact 内不带多级目录
+      - name: Stage artifact
+        id: stage
+        run: |
+          set -euo pipefail
+          SHA="$(echo "$GITHUB_SHA" | cut -c1-7)"
+          mkdir -p out
+          SRC="$(find container -path '*/build/outputs/apk/debug/*.apk' | head -n1 || true)"
+          if [ -n "${SRC:-}" ]; then
+            cp "$SRC" "out/container-shitjumpingvm-${SHA}.apk"
+            DST="out/container-shitjumpingvm-${SHA}.apk"
+            case "$DST" in
+              *.apk) ;;
+              *) echo "::error::artifact must end with .apk: $DST"; exit 1 ;;
+            esac
+            echo "path=out/container-shitjumpingvm-${SHA}.apk" >> "$GITHUB_OUTPUT"
+            ls -lh out
+          else
+            echo "::warning::no apk produced"
+          fi
+
+      # 不使用 upload-artifact（强制 zip）；直接挂 Release asset。
+      - name: Publish APK to Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: apk-latest
+          name: APK (latest)
+          body: "container APK built from ${{ github.sha }}"
+          prerelease: true
+          overwrite_files: true
+          files: out/*.apk
+
       - name: Unit tests
         working-directory: container
         run: |
@@ -207,16 +243,14 @@ jobs:
           set +e
           ./gradlew :core:sandbox:testDebugUnitTest --no-daemon > /tmp/unit.log 2>&1
           rc=$?
-          # 依赖下载偶发失败时重试一次。实测过 CI #46：
-          #   > Could not download nativeruntime-dist-compat-1.0.16.jar
-          #     (org.robolectric:nativeruntime-dist-compat:1.0.16)
-          #   > Could not get resource 'https://repo.maven.apache.org/maven2/...'
-          # 该 artifact 在 Maven Central 确实存在（2024-10-22 发布），是网络问题。
-          # gradle.properties 里已配 http 超时 + repository max.retries=6，
-          # 这里再加一层进程级重试，覆盖 Gradle 内置重试也放弃的情况。
-          if [ $rc -ne 0 ] && grep -qE "Could not download|Could not get resource|Connection timed out|Read timed out" /tmp/unit.log; then
-            echo "::warning::依赖下载失败，15s 后重试一次"
-            sleep 15
+          # 依赖下载偶发失败时重试一次。实测的两种形态：
+          #   > Could not download nativeruntime-dist-compat-1.0.16.jar ...
+          #   > Could not get resource 'https://repo.maven.apache.org/maven2/junit/junit/4.13.2/junit-4.13.2.pom'
+          #     Received status code 429 from server: Too Many Requests   ← 2026-11-25 实测
+          # 都是网络/限流问题，artifact 本身在 Maven Central 存在。
+          if [ $rc -ne 0 ] && grep -qE "Could not download|Could not get resource|Too Many Requests|429|Connection timed out|Read timed out" /tmp/unit.log; then
+            echo "::warning::依赖下载失败/限流，20s 后重试一次"
+            sleep 20
             ./gradlew :core:sandbox:testDebugUnitTest --no-daemon > /tmp/unit.log 2>&1
             rc=$?
           fi
@@ -256,39 +290,6 @@ jobs:
           find container -name '*.apk' -exec ls -lh {} \; 2>/dev/null || echo "no apk"
           echo "=== native libs ==="
           find container -name '*.so' -exec ls -lh {} \; 2>/dev/null | head -n 20 || true
-
-      # 产物体面化：container-<repo>-<sha>.apk，artifact 内不带多级目录
-      - name: Stage artifact
-        id: stage
-        run: |
-          set -euo pipefail
-          SHA="$(echo "$GITHUB_SHA" | cut -c1-7)"
-          mkdir -p out
-          SRC="$(find container -path '*/build/outputs/apk/debug/*.apk' | head -n1 || true)"
-          if [ -n "${SRC:-}" ]; then
-            cp "$SRC" "out/container-shitjumpingvm-${SHA}.apk"
-            # 产物约定：文件名必须 .apk 结尾
-            DST="out/container-shitjumpingvm-${SHA}.apk"
-            case "$DST" in
-              *.apk) ;;
-              *) echo "::error::artifact must end with .apk: $DST"; exit 1 ;;
-            esac
-            echo "path=out/container-shitjumpingvm-${SHA}.apk" >> "$GITHUB_OUTPUT"
-            ls -lh out
-          else
-            echo "::warning::no apk produced"
-          fi
-
-      # 不使用 upload-artifact（强制 zip）；直接挂 Release asset。
-      - name: Publish APK to Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: apk-latest
-          name: APK (latest)
-          body: "container APK built from ${{ github.sha }}"
-          prerelease: true
-          overwrite_files: true
-          files: out/*.apk
 
       - name: Upload build reports
         if: failure()
