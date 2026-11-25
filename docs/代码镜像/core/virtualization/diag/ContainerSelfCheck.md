@@ -40,7 +40,8 @@
 | --- | --- | --- | --- | --- |
 | 1 | S3 用**临时规则**+真实文件，而不是写真实 `/sdcard` | 自检不能污染真实外部存储，也不能依赖 appops/权限状态 | 必要偏差 | S3 的 `detail` 含 `target=... inSandbox=...` |
 | 2 | S5 在无诊断文件时返回 `ok=true, detail=skipped(no diag file)` | release 构建不产出诊断文件；"跳过"不等于"失败" | 中性偏差 | S5 detail |
-| 3 | S6 只检查段名存在，不解析业务内容 | 自检不该复刻配置解析（那由 `PathSpoofConfig` 负责） | 中性偏差 | S6 detail `len=...` |
+| 3 | S3 写 **`context.cacheDir/selfcheck`** 而不是 `virtualRoot` | `virtualRoot` 是用户/Files 页面可见目录，写进去会污染（实机踩过）；cacheDir 私有且可回收 | 必要偏差（2026-11-25 修正） | S3 detail 的 `target=.../cache/selfcheck/w/f.txt` |
+| 4 | S6 只检查段名存在，不解析业务内容 | 自检不该复刻配置解析（那由 `PathSpoofConfig` 负责） | 中性偏差 | S6 detail `len=...` |
 | 4 | 不检查 guest 侧（`getFilesDir` 等） | 容器主进程上下文拿不到 guest 的 `Context` | 必要偏差 | 由探针 J 系列覆盖 |
 
 ## 约束与坑
@@ -51,6 +52,12 @@
      **CI 不执行**，只在设备上由 `CmdReceiver` 的 `SELF_CHECK` 触发。
 2. **临时状态必须清理**：S1/S3 的规则与文件都在 `finally` 里删；否则自检本身会污染运行中的容器。
 3. **前缀必须与真实规则隔离**：用 `/selfcheck/in|out|w/`，不要复用 `/data`、`/sdcard` 前缀（会与真实规则互撞）。
-4. **S3 绝不能写宿主**：目标路径必须来自 `translate()` 的结果，并再次断言 `startsWith(sandboxRoot)`。
+4. **S3 绝不能写宿主，也不该写 `virtualRoot`**：
+   - 目标路径必须来自 `translate()` 的结果，并断言 `startsWith(writeRoot)`；
+   - `writeRoot` 是 **app 私有 `context.cacheDir/selfcheck`**，不是 `virtualRoot`——
+     后者是用户/容器 Files 页面可见的目录，自检不该在其中留任何痕迹（2026-11-25 实机踩过：
+     残留 `virtual/selfcheck/w` 目录，出现在 Files 页面里）。
+   - 目标目录选哪里不影响验证力：只要路径经过 `translate()`，验的就是"规则翻译 + 真的能写"；
+     "写入落沙箱"这条能力由探针 `J08/F01/F09/F14` 覆盖，容器自检不必重复证明。
 5. **结果落两处**：`checks.log` 一行 `S selfcheck hookcheck ...`（可被 `COLLECT_OUT` 拉走）+ logcat `SELF_CHECK -> ...`。
 6. 不要在自检里调用 `setupAppRedirections` / `removeAppRedirections`（会动真实 guest 的规则）。
