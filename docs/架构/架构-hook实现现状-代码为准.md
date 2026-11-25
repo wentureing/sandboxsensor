@@ -180,7 +180,7 @@ v141 只对齐成功路径 → Via 完全不可交互（`docs/输出/记录/记�
 
 | # | 缺口 | 事实 | 影响 | 归类 |
 | --- | --- | --- | --- | --- |
-| 1 | **NIO2 整族** | `UnixNativeDispatcher` 0 实现（脚本实测 38 个路径相关方法） | `Files.*`/`Path` 不被重定向；若 App 自己拼宿主路径再用 NIO → 写落宿主 | ⚠️ **待评估**（探针加 `F15`） |
+| 1 | **NIO2 整族** | `UnixNativeDispatcher` 0 实现（脚本实测 38 个路径相关方法） | `Files.*`/`Path` 不被重定向；若 App 自己拼宿主路径再用 NIO → 写落宿主 | ⏸ **暂不实现**（用户决定：NIO 用得少，除严重危害权限外不做） |
 | 2 | **`readlink`（A 族与 NIO）** | native 实现在 `libjavacore.so`（系统库，不 patch）→ 返回**真实目标** | App 可把沙箱路径换算成宿主真实路径 | 🔶 **疑似缺陷（泄露）** |
 | 3 | **`setPermission0`（B 族）** | `File.setWritable/setExecutable` 不翻译 → 作用到不存在路径 → 静默 false | App 可能判定"不可写" | 🔶 **待评估（可用性）** |
 | 4 | `getSpace0` / `statvfs` / `fstatvfs` | 未 hook | 只影响"磁盘容量"检测面 | ✅ **设计取舍**（按理念：不含包名的路径不改） |

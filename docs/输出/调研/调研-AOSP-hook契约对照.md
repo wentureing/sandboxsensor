@@ -123,7 +123,7 @@ statvfs0 pathconf0 fpathconf mknod0 utimes0 futimes
 | `getNameMax0` / `ftruncate` / `lseek` / `fsync` | ✅ 正常取舍 | 与路径无关或无害 |
 | `chown` / `fchown` / `lchown` | ✅ 正常取舍 | 容器与 guest **同 uid**，改属主无意义；强行 hook 反而危险 |
 | `link` / `symlink` | ✅ 正常取舍（安全优先） | 硬/软链是**逃逸面**；"宁可不做"符合"只误导、不危害读写" |
-| NIO `UnixNativeDispatcher` 整族（45 个 native） | ⚠️ **边界（待评估）** | 当前 App 多走 `Context` 目录方法（`VirtualContext` 已给真沙箱路径），NIO 不翻译通常不影响隔离；**但**若 App 自己拼宿主路径再用 `Files.*`，写入会落宿主 → 需探针实测（`F*` 系列只覆盖 `File`，未覆盖 `Files`） |
+| NIO `UnixNativeDispatcher` 整族（45 个 native） | ⏸ **暂不实现（用户决定）** | 用户 2026-11-25："NIO 用得少，除了严重危害权限外，暂不实现"。当前 App 多走 `Context` 目录方法（`VirtualContext` 已给真沙箱路径），NIO 不翻译通常不影响隔离；若将来发现某 App 用 NIO 写穿宿主，再按 P0 评估 |
 | **Java 层 `Linux.readlink`** | 🔶 **疑似缺陷（③ 泄露）** | `Os.readlink` 是 native 方法、实现在 `libjavacore.so`（系统库，不被 GOT patch）→ 返回**真实目标**。App 可用它把沙箱路径换算成宿主真实路径。**但**：先确认是否有 App 真的这么用（探针可加一项） |
 | **B 族 `setPermission0`** | 🔶 **待评估（② 可用性）** | `File.setWritable/setExecutable` 不翻译 → 作用到不存在的宿主路径 → 静默 `false`。真机上这类调用不常见，但一旦出现，App 可能判定"不可写"而拒绝保存 |
 | A 族 `chmod` / `fchmod` | 🔶 待评估 | `Os.chmod` 走 `Linux.chmod`（native，libjavacore）→ 不翻译；影响面同上，出现频率低于 `File.*` |

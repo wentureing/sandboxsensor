@@ -24,6 +24,8 @@
 | **路径重定向规则（guest 进程）** | ✅ **v142 起生效** | 之前 `rules=0`（规则只在主进程注册） |
 | **native hook 覆盖面** | ✅ 已实现，但**默认生效面有限** | 27 条符号（`native-hook.cpp:1679-1705`，含 `mkdir`/`mkdirat`/`unlink`/`unlinkat`/`rename`）+ 16 个 Java `RegisterNatives` 方法（`debug.nextvm.javaIo=0` → **默认不安装**）。库级过滤：容器自身/图形栈永不 patch，系统库默认不 patch（`NS_HOOK_SYSTEM_LIBS=0`）。**默认配置下 Java 层落宿主、native 层落沙箱** → 见 `../架构/架构-hook实现现状-代码为准.md` |
 | **多实例** | ⏸ **开发暂停** | 合成路径不含 instanceId（`ProcessSlot.kt:193`），同包两份会互串；用户 2026-11-25 决定暂停，B 阶段不加 slot 签名 |
+| **跨进程文件选择器** | ❌ **未接管（会跳出容器）** | via 设置「默认下载目录」时拉起了**系统** `DocumentsUI`，用户可选宿主真实目录 → 后续下载写容器外。`ACTION_OPEN_DOCUMENT(_TREE)` / `GET_CONTENT` / `CREATE_DOCUMENT` 目前**完全没拦截**。计划见 `../计划/计划-容器内文件选择器.md`（仅计划，暂不实现） |
+| **NIO（`java.nio.file.Files`）路径翻译** | ⏸ **暂不实现** | `UnixNativeDispatcher` 0 覆盖（38 个路径相关 native）。用户 2026-11-25 决定：NIO 用得少，除严重危害权限外不做。见 `../输出/调研/调研-AOSP-hook契约对照.md` |
 | **路径欺骗豁免（A 阶段，`6b5cfbe`）** | ⚠️ **已合并，未装包验证** | `PathSpoofConfig` / `PathPolicy`：豁免 = 不产生合成路径、**保留**沙箱隔离；配置 `<filesDir>/path_spoof.conf`（首次生成默认含 `mark.via`）；`CmdReceiver` 三命令 `SPOOF_EXEMPT_ADD/REMOVE/LIST`；改完需重启。单测 H1–H10 全绿，真机未验证（设备仍是 `b992ba4`）。见 `../代码镜像/core/model/PathPolicy.md` |
 | **合成路径的「族根」翻译** | ✅ **已修（`11f23d5` / `031eba8`）** | ROOT_FORM 匹配语义：以 `/` 结尾的规则同时拥有"去尾斜杠的根形态"，Java 与 C++ 同改；T39/T41/T42/T43 全绿（CI `45579005086`）。规则集合未变 |
 | **Java 层文件 I/O 重定向（v141）** | ⚠️ **已实现但默认关闭** | `RegisterNatives` 替换 `libcore.io.Linux.open/access` 能装上（W38 曾通过），但会让 Via **完全不能交互**（用户对照确认）。根因是异常语义与 AOSP 不一致，详见 `../输出/记录/记录-JavaIoHook导致Via不可交互.md`。开关：`debug.nextvm.javaIo`（默认 0） |
