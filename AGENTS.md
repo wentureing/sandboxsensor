@@ -250,13 +250,13 @@ core/hook/cpp/hooks_io.cpp                        →  docs/代码镜像/core/ho
 | 加一个开关/分支 | ①②  同上，且测试要覆盖**两个分支** |
 | 改可见性（`private`→`internal`） | ① `--deps` 检查结果记录进镜像文档的「约束与坑」 |
 
-**CI 按包粒度执行**（`module-test.yml` 的 `test_filter` 输入）：
+**CI 粒度**（2026-11-25 起）：`module-test` 已是**模块级 matrix**（virtualization / hook / sandbox 并行），
+整模块失败不再连坐；要精确定位用 `test_filter` 输入（按包/类名）。
 
 ```powershell
-# 只跑 activitythread 包（刚拆完的模块）
 node tools/release/gh-api.mjs --dispatch module-test.yml main \
-  modules=":core:virtualization" \
-  test_filter="com.nextvm.core.virtualization.engine.activitythread.*"
+  ref="baseline-v150" modules=":core:virtualization" \
+  test_filter="com.nextvm.core.virtualization.diag.*"
 ```
 
 **为什么按包**：整模块测试会连坐（一个包改坏、全模块红），按包跑能直接定位到刚拆的那部分，
@@ -393,25 +393,11 @@ git -C _ref/ShitJumpingVM diff --stat >> docs/输出/变更/<date>-<task>.actual
 
 以上任一 → 就是违反本规则。触发后**不要**为了「保险」再 dispatch 第二次。
 
-### 历史教训（为什么现在这么定）
+### 历史教训（一句话）
 
-**教训 1：push 后又 dispatch**
-
-```
-#29  build-probe      cancelled  push               <- push 自动触发
-#30  build-probe      cancelled  workflow_dispatch  <- 我又补一次
-#31  build-probe      cancelled  workflow_dispatch  <- 又补一次
-```
-
-三个 run 撞在同一个 `concurrency` group（`cancel-in-progress: true`）→ **全部互相取消**，
-一个可用产物都没有。
-
-**教训 2：靠 `paths` 过滤保证「只跑一个」是不可靠的**
-
-我一度以为 `paths` 过滤能保证「改探针只跑探针」，实际它只看变更集里**有没有**那些文件。
-只要一次提交同时碰到两边，两个都会跑（见上）。
-
-**→ 所以现在改成：编译只能显式 dispatch。**
+push 自动触发 + 手动 dispatch 会撞进同一个 `concurrency` group（`cancel-in-progress: true`）互相取消；
+`paths` 过滤也保证不了"只跑一个"（一次提交同时碰到两边就两个都跑）。
+**→ 所以现在：编译只能显式 dispatch。** 细节见 `docs/输出/变更/20261124-ci-manual-dispatch-only.md`。
 
 ### 为什么容器一直都要手动 dispatch
 
@@ -457,12 +443,9 @@ node tools/release/gh-api.mjs "/repos/wentureing/sandboxsensor/actions/runs?per_
 - **版本号递增**：`versionCode = GITHUB_RUN_NUMBER`、`versionName = 1.0.0-<7位sha>`
   递增的 versionCode 配合固定 keystore 才能 `adb install -r` 覆盖
 - **现阶段不做 release 分发包**（`app/build.gradle.kts` 没有 `signingConfigs`，也用不到）
-- **⚠️ 签名固定的验证方法（2026-11-24 发现这个问题从未验证过）**
-  - 连续两次 CI 的 APK 必须用 `apksigner verify --print-certs` 对比证书 SHA-256，**完全一致**才算成功
-  - 本项目的 `Cache debug keystore` **一直没生效**：Post 步骤报
-    `[warning]Path Validation Error: Path(s) ... do(es) not exist`
-    → 每次构建都生成新 keystore → 每次签名不同 → `adb install -r` 必失败
-  - 详见 `docs/输出/记录/记录-签名漂移根因-Cache-keystore从未生效.md`
+- **签名固定已生效且必须校验**：连续两次 CI 的 APK 用 `apksigner verify --print-certs` 比 SHA-256，一致才算成功。
+  （2026-11-24 之前 `Cache debug keystore` 从未生效，每次重建 keystore → `install -r` 必失败；
+  根因与修复见 `docs/输出/记录/记录-签名漂移根因-Cache-keystore从未生效.md`。）
 
 ## 提交前必跑：本地静态检查（毫秒级）
 
@@ -498,20 +481,10 @@ node tools/lint/check-hook-idempotent.mjs <目录>
 
 ### 为什么自写，而不是用 detekt / ktlint
 
-联网核对过：**detekt 的类型解析不完整**（有实测报告：377 个编译器错误静默通过），
-ktlint / semgrep 同理 —— 它们**都不做完整类型解析，查不出「未定义符号 / 私有成员越界」**。
+detekt / ktlint / semgrep **都不做完整类型解析**，查不出「未定义符号 / 私有成员越界」；
 那类错误只有编译器能查，而编译器需要 Gradle + Android SDK（分钟级）。
-
-所以分工是：
-
-| 层 | 工具 | 耗时 | 能拦什么 |
-| --- | --- | --- | --- |
-| **① 本地自写检查** | `tools/lint/kotlin-lint.mjs` | **毫秒** | 括号不平衡、KDoc 内 `/*`（Kotlin 块注释可嵌套 → Unclosed comment）、注释未闭合、**跨文件访问 private 成员** |
-| ② 编译器 | `module-test.yml`（只编译被测模块） | ~2 分钟 | 未定义符号、类型错误、可见性 |
-| ③ 完整构建 | `container-build.yml` | ~4 分钟 | 全部 + 打包 |
-
-**① 的存在意义**：把"本来要等 2 分钟 CI 才知道"的错，提前到提交前几毫秒发现。
-本项目已经连续 3 轮因为同一类问题（拆分后漏私有依赖 / KDoc 里的 `/*`）让 CI 失败。
+所以分工是：**本地自写检查（毫秒，拦括号/KDoc/跨文件 private）→ module-test（~2 分钟，编译）→ container-build（~4 分钟，打包）**。
+自写检查的意义：把"要等 2 分钟 CI 才知道"的错提前到提交前几毫秒；本项目已连续 3 轮因同类问题让 CI 失败。
 
 ### 教训（真实案例）
 
