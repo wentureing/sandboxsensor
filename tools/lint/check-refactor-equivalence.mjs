@@ -26,10 +26,22 @@ const oldFile = arg('old-file');
 const oldFn = arg('old-fn');
 const newFile = arg('new-file');
 const newFn = arg('new-fn');
+// --ignore <正则>：在比较前删除匹配的整行（用于忽略新增的插桩行）
+const ignore = arg('ignore', null);
+const ignoreRe = ignore ? new RegExp(ignore) : null;
 
 if (!oldFile || !oldFn || !newFile || !newFn) {
-  console.error('用法: --old-file <导出后的旧文件> --old-fn <函数名> --new-file <当前文件> --new-fn <函数名>');
+  console.error('用法: --old-file <导出后的旧文件> --old-fn <函数名> --new-file <当前文件> --new-fn <函数名> [--ignore <正则>]');
   process.exit(2);
+}
+
+/** 删除匹配 ignore 正则的整行（只对函数体内部生效）。 */
+function dropIgnored(body) {
+  if (!ignoreRe) return body;
+  return body
+    .split('\n')
+    .filter((line) => !ignoreRe.test(line))
+    .join('\n');
 }
 
 /** 从源码里截出函数体（按花括号配对）。支持扩展函数 `fun Receiver.name(`。 */
@@ -84,8 +96,8 @@ const newBody = extractFunction(readFileSync(newFile, 'utf8'), newFn);
 if (!oldBody) { console.error(`未在 ${oldFile} 找到函数 ${oldFn}`); process.exit(2); }
 if (!newBody) { console.error(`未在 ${newFile} 找到函数 ${newFn}`); process.exit(2); }
 
-const a = normalize(oldBody);
-const b = normalize(newBody);
+const a = normalize(dropIgnored(oldBody));
+const b = normalize(dropIgnored(newBody));
 
 if (a === b) {
   console.log(`等价 ✓  ${oldFn} == ${newFn}`);
