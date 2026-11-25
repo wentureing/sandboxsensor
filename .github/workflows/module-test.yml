@@ -86,7 +86,13 @@ jobs:
 
   module-test:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      # 模块级并行：每个模块一个 job，互不连坐，墙钟不再叠加。
+      # 用户 2026-11-25：#42/#44 单 job 串行跑到 8 分钟，要求拆分。
+      matrix:
+        module: [":core:virtualization", ":core:hook", ":core:sandbox"]
 
     steps:
       - name: Checkout container source
@@ -185,25 +191,20 @@ jobs:
           echo '===== settings core:hook ====='
           grep -n 'core:hook' settings.gradle.kts || true
       - name: Run module unit tests
+        # matrix 展开后每个 job 只跑自己那个模块；inputs.modules 用于显式指定子集。
+        if: ${{ inputs.modules == '' || contains(inputs.modules, matrix.module) }}
         working-directory: container
         run: |
           set -euo pipefail
           chmod +x gradlew
-          MODULES="${{ inputs.modules || ':core:virtualization :core:hook :core:sandbox' }}"
+          MODULE="${{ matrix.module }}"
           FILTER="${{ inputs.test_filter || '' }}"
-          TASKS=""
-          for m in $MODULES; do
-            TASKS="$TASKS ${m}:testDebugUnitTest"
-          done
+          echo "Running: ${MODULE}:testDebugUnitTest filter='${FILTER}'"
           if [ -n "$FILTER" ]; then
-            # 只跑匹配的测试类（Gradle --tests 语法）。
-            # failOnNoMatchingTests=false：某些模块没有匹配类时不至于整个任务失败。
-            echo "Running:$TASKS --tests '$FILTER'"
-            ./gradlew --no-daemon --stacktrace $TASKS --tests "$FILTER" \
-              -DfailOnNoMatchingTests=false
+            ./gradlew --no-daemon --stacktrace "${MODULE}:testDebugUnitTest" \
+              --tests "$FILTER" -DfailOnNoMatchingTests=false
           else
-            echo "Running:$TASKS"
-            ./gradlew --no-daemon --stacktrace $TASKS
+            ./gradlew --no-daemon --stacktrace "${MODULE}:testDebugUnitTest"
           fi
 
       # 诊断序列模板（DiagnosticsSequenceOutputTest 写到 build/diagnostics/）
