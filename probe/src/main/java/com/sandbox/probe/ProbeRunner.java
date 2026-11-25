@@ -599,6 +599,174 @@ public final class ProbeRunner {
                     + " made=" + made
                     + " list=" + (names == null ? "null" : java.util.Arrays.toString(names));
         });
+
+        // ---- F09-F14：复刻 via 离线列表（ha/e.f + ha/e.e）的完整判断链 ----
+        // 真机对照用的证据链：哪一条坏，就对应哪一个 hook 没生效。
+        //   F09 写入侧目录        -> getExternalFilesDir("offline") 能否建目录+写文件
+        //   F10 六项判断          -> 复刻 ha/e.f 的 canRead/exists/isFile/listFiles/length/lastModified
+        //   F11 读取侧宿主形态    -> getOpPackageName() 拼出来的路径能否列到同一批文件
+        //   F12 MediaStore 查询   -> 复刻 ha/e.e 的 content://media/external/file
+        //   F13 mime/扩展名判定   -> 复刻 ha/e.d 的 mht/pdf 判定
+        //   F14 file:// Uri 链路  -> Uri.fromFile -> getPath -> new File -> exists/length
+
+        put("F09", "fs", "offline dir write", () -> {
+            try {
+                File offline = ctx.getExternalFilesDir("offline");
+                if (offline == null) return "getExternalFilesDir(offline)=null";
+                boolean made = offline.exists() || offline.mkdirs();
+                File mht = new File(offline, "probe-a.mht");
+                File txt = new File(offline, "probe-b.txt");
+                try (FileOutputStream o1 = new FileOutputStream(mht)) {
+                    o1.write("<html><body>probe-a</body></html>".getBytes("UTF-8"));
+                }
+                try (FileOutputStream o2 = new FileOutputStream(txt)) {
+                    o2.write("probe-b".getBytes("UTF-8"));
+                }
+                return "path=" + offline.getAbsolutePath()
+                        + " made=" + made
+                        + " mhtLen=" + mht.length()
+                        + " txtLen=" + txt.length();
+            } catch (Throwable t) {
+                return "EX " + t.getClass().getSimpleName() + ": " + t.getMessage();
+            }
+        });
+
+        put("F10", "fs", "via-filter replica", () -> {
+            try {
+                File offline = ctx.getExternalFilesDir("offline");
+                if (offline == null) return "offline=null";
+                // 复刻 ha/e.f 对目录本身的三个判断
+                StringBuilder sb = new StringBuilder();
+                sb.append("dir.canRead=").append(offline.canRead());
+                sb.append(" dir.exists=").append(offline.exists());
+                sb.append(" dir.isFile=").append(offline.isFile());
+                File[] files = offline.listFiles();
+                sb.append(" listFiles=").append(files == null ? "null" : String.valueOf(files.length));
+                if (files != null) {
+                    for (File f : files) {
+                        // 复刻 ha/e.f 循环体里对每个条目的取值
+                        sb.append(" [").append(f.getName())
+                                .append(" len=").append(f.length())
+                                .append(" mtime=").append(f.lastModified())
+                                .append(" canRead=").append(f.canRead())
+                                .append(" isFile=").append(f.isFile())
+                                .append("]");
+                    }
+                }
+                return sb.toString();
+            } catch (Throwable t) {
+                return "EX " + t.getClass().getSimpleName() + ": " + t.getMessage();
+            }
+        });
+
+        put("F11", "fs", "host-form list (via read side)", () -> {
+            try {
+                String opPkg = ctx.getOpPackageName();
+                File hostOffline = new File(
+                        Environment.getExternalStorageDirectory(),
+                        "Android/data/" + opPkg + "/files/offline");
+                String[] names = hostOffline.list();
+                File[] files = hostOffline.listFiles();
+                StringBuilder sb = new StringBuilder();
+                sb.append("opPkg=").append(opPkg);
+                sb.append(" path=").append(hostOffline.getAbsolutePath());
+                sb.append(" exists=").append(hostOffline.exists());
+                sb.append(" list=").append(names == null ? "null" : java.util.Arrays.toString(names));
+                if (files != null) {
+                    for (File f : files) {
+                        sb.append(" [").append(f.getName())
+                                .append(" len=").append(f.length()).append("]");
+                    }
+                }
+                return sb.toString();
+            } catch (Throwable t) {
+                return "EX " + t.getClass().getSimpleName() + ": " + t.getMessage();
+            }
+        });
+
+        put("F12", "fs", "MediaStore query (via ha/e.e)", () -> {
+            android.database.Cursor c = null;
+            try {
+                android.net.Uri uri = android.provider.MediaStore.Files.getContentUri("external");
+                String[] proj = {"_id", "_display_name", "date_added", "mime_type", "_size", "relative_path"};
+                c = ctx.getContentResolver().query(
+                        uri, proj, "relative_path like ?", new String[]{"%"}, "date_added DESC");
+                if (c == null) return "uri=" + uri + " cursor=null";
+                StringBuilder sb = new StringBuilder();
+                sb.append("uri=").append(uri).append(" count=").append(c.getCount());
+                int shown = 0;
+                while (c.moveToNext() && shown < 5) {
+                    sb.append(" [").append(c.getString(1))
+                            .append(" size=").append(c.getLong(4))
+                            .append(" mime=").append(c.getString(3))
+                            .append(" path=").append(c.getString(5))
+                            .append("]");
+                    shown++;
+                }
+                // 另外单独统计「有没有 .mht」
+                return sb.toString();
+            } catch (Throwable t) {
+                return "EX " + t.getClass().getSimpleName() + ": " + t.getMessage();
+            } finally {
+                if (c != null) try { c.close(); } catch (Throwable ignored) { }
+            }
+        });
+
+        put("F13", "fs", "mime/ext verdict (via ha/e.d)", () -> {
+            try {
+                File offline = ctx.getExternalFilesDir("offline");
+                if (offline == null) return "offline=null";
+                File[] files = offline.listFiles();
+                if (files == null) return "listFiles=null";
+                StringBuilder sb = new StringBuilder();
+                for (File f : files) {
+                    String name = f.getName();
+                    int dot = name.lastIndexOf('.');
+                    String ext = dot < 0 ? null : name.substring(dot + 1).toLowerCase(java.util.Locale.ROOT);
+                    String mime = null;
+                    try {
+                        mime = ctx.getContentResolver().getType(android.net.Uri.fromFile(f));
+                    } catch (Throwable ignored) {
+                    }
+                    boolean isMht = "multipart/related".equals(mime) && "mht".equals(ext);
+                    boolean isPdf = "application/pdf".equals(mime) && "pdf".equals(ext);
+                    // ha/e.d 的判定：既非 mht 也非 pdf 时返回 null（条目被丢）
+                    sb.append(" [").append(name)
+                            .append(" ext=").append(ext)
+                            .append(" mime=").append(mime)
+                            .append(" isMht=").append(isMht)
+                            .append(" isPdf=").append(isPdf)
+                            .append(" keep=").append(isMht || isPdf || mime == null)
+                            .append("]");
+                }
+                return sb.toString();
+            } catch (Throwable t) {
+                return "EX " + t.getClass().getSimpleName() + ": " + t.getMessage();
+            }
+        });
+
+        put("F14", "fs", "file uri chain (via ha/e.f)", () -> {
+            try {
+                File offline = ctx.getExternalFilesDir("offline");
+                if (offline == null) return "offline=null";
+                File[] files = offline.listFiles();
+                if (files == null || files.length == 0) return "no entries";
+                StringBuilder sb = new StringBuilder();
+                for (File f : files) {
+                    android.net.Uri u = android.net.Uri.fromFile(f);
+                    String p = u.getPath();
+                    File back = p == null ? null : new File(p);
+                    sb.append(" [uri=").append(u.getScheme()).append("://")
+                            .append(" path=").append(p)
+                            .append(" exists=").append(back != null && back.exists())
+                            .append(" len=").append(back == null ? -1 : back.length())
+                            .append("]");
+                }
+                return sb.toString();
+            } catch (Throwable t) {
+                return "EX " + t.getClass().getSimpleName() + ": " + t.getMessage();
+            }
+        });
     }
 
     // ---------------------------------------- 挂载表（新大类）
