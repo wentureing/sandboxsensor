@@ -162,16 +162,34 @@ v141 只对齐成功路径 → Via 完全不可交互（`docs/输出/记录/记�
 
 ---
 
-## 六、未覆盖与已知缺口
+## 六、未覆盖与已知缺口（按「设计取舍 / 疑似缺陷 / 待评估」分类）
 
-| # | 缺口 | 事实 | 影响 |
+> **判据**（用户 2026-11-25：容器的重点是"容器"，不是和真机完全一样）：
+> 只有出现 ① 写入/读取落宿主 ② guest 功能异常 ③ 不可接受泄露 之一才算缺陷；
+> 三者都不成立且补齐风险大于收益的，属**有意的设计取舍**。
+> 逐方法对照见 `docs/输出/调研/调研-AOSP-hook契约对照.md`，
+> 可复跑：`node tools/lint/check-hook-coverage.mjs`（本地 AOSP 源码见 `tools/tmp/libcore-src`）。
+
+**Java 层 `RegisterNatives` 覆盖（AOSP 基线：A 族 19 / B 族 11 / NIO 38 个路径相关方法）**
+
+| 族 | 已覆盖 | 缺 | 缺的部分主要归类 |
 | --- | --- | --- | --- |
-| 1 | **NIO2** | `sun.nio.fs.UnixNativeDispatcher.*` **0 实现**（全仓 grep 无匹配） | `Files.*` / `Path` 的调用不被重定向。旧文档把它写成"用 RegisterNatives 覆盖"，那是**计划不是现状** |
-| 2 | **L6 运行期加载库** | `libnativeloader.so` 未被 patch → `patch_newly_loaded_libraries` 不触发 | 新加载的库里的 libc 调用不被拦（P28 实测写穿到真实 `/sdcard`） |
-| 3 | **L7 直接 syscall** | `hooked_syscall` 只打日志 | 只能靠"伪造数据源"覆盖，不单独拦 |
-| 4 | `hooked_open` 无 `ENOENT` 兜底 | `:674-688` | 跨层时静默失败，用户不可察觉 |
-| 5 | `hiddenPaths` 无 native 精确匹配 | C++ 只有前缀表 `g_path_redirects` | Java 侧 hide 了、native 侧不知道 |
-| 6 | L8/L9/L10 | 不可能 | isolated 进程、继承 fd、同 uid DAC |
+| A 族 `libcore.io.Linux` | 8/19（open/access/stat/lstat/fstat/mkdir/unlink/rename） | 11 | `chmod/fchmod/readlink` **疑似缺陷**；`chown/link/symlink/statvfs/ftruncate` 设计取舍 |
+| B 族 `java.io.UnixFileSystem` | 8/11 | 3 | `setPermission0` **疑似缺陷**；`getSpace0`/`getNameMax0` 设计取舍 |
+| NIO `sun.nio.fs.UnixNativeDispatcher` | 0/38 | 38 | 主族**待评估**（需探针实测是否构成隔离漏洞）；`link0/symlink0/mknod0/statvfs0` 设计取舍 |
+
+| # | 缺口 | 事实 | 影响 | 归类 |
+| --- | --- | --- | --- | --- |
+| 1 | **NIO2 整族** | `UnixNativeDispatcher` 0 实现（脚本实测 38 个路径相关方法） | `Files.*`/`Path` 不被重定向；若 App 自己拼宿主路径再用 NIO → 写落宿主 | ⚠️ **待评估**（探针加 `F15`） |
+| 2 | **`readlink`（A 族与 NIO）** | native 实现在 `libjavacore.so`（系统库，不 patch）→ 返回**真实目标** | App 可把沙箱路径换算成宿主真实路径 | 🔶 **疑似缺陷（泄露）** |
+| 3 | **`setPermission0`（B 族）** | `File.setWritable/setExecutable` 不翻译 → 作用到不存在路径 → 静默 false | App 可能判定"不可写" | 🔶 **待评估（可用性）** |
+| 4 | `getSpace0` / `statvfs` / `fstatvfs` | 未 hook | 只影响"磁盘容量"检测面 | ✅ **设计取舍**（按理念：不含包名的路径不改） |
+| 5 | `chown` / `link` / `symlink` / `mknod0` | 未 hook | 同 uid 无意义 / 逃逸面 | ✅ **设计取舍**（安全优先） |
+| 6 | **L6 运行期加载库** | `libnativeloader.so` 未被 patch → `patch_newly_loaded_libraries` 不触发 | 新加载库里的 libc 调用不被拦（P28 实测写穿到真实 `/sdcard`） | ⚠️ 待修（成本高） |
+| 7 | **L7 直接 syscall** | `hooked_syscall` 只打日志 | 只能靠伪造数据源覆盖 | ✅ 设计取舍 |
+| 8 | `hooked_open` 无 `ENOENT` 兜底 | `:674-688` | 跨层时静默失败 | 🔶 待评估（与"层间不一致"同源） |
+| 9 | `hiddenPaths` 无 native 精确匹配 | C++ 只有前缀表 | Java 侧 hide 了 native 不知道 | ⚠️ 待修（低优先） |
+| 10 | L8/L9/L10 | 不可能 | isolated 进程、继承 fd、同 uid DAC | ✅ 接受边界 |
 
 ---
 
