@@ -158,6 +158,18 @@ jobs:
             ./gradlew --no-daemon --stacktrace $TASKS
           fi
 
+      # 诊断序列模板（DiagnosticsSequenceOutputTest 写到 build/diagnostics/）
+      - name: Show diagnostics sequence
+        if: always()
+        working-directory: container
+        run: |
+          if [ -f core/common/build/diagnostics/checks-template.txt ]; then
+            echo "===== DIAGNOSTICS SEQUENCE ====="
+            cat core/common/build/diagnostics/checks-template.txt
+            echo "===== END ====="
+          else
+            echo "（本次未生成诊断序列）"
+          fi
       - name: Publish test report
         if: always()
         # 报告步骤失败不应该让整个 job 变红（测试本身的失败由上面的 gradlew 步骤决定）。
