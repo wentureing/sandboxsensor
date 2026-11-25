@@ -1,7 +1,0 @@
-# 临时文件目录（不入库内容）
-
-AGENTS.md 规则 10 要求：重构对照时把旧文件导出到这里，例如
-  git -C _ref/ShitJumpingVM show <commit>:<path> | Set-Content tools/tmp/old.kt
-
-长期可复用的分析工具放 tools/analyze/，AOSP 参考源码放 tools/ref/。
-任务完成后应清空本目录，只留这个 .gitkeep。

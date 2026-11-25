@@ -31,6 +31,9 @@ token.txt
 # ---- 第三方参考资料（clone 的上游仓库副本）----
 _ref/
 
+# ---- 本地临时脚本/中间文件（含 AOSP 浅克隆副本，绝不入库）----
+tools/tmp/
+
 # ---- CI 自建 Android SDK（Actions 内生成）----
 .android-sdk/
 
