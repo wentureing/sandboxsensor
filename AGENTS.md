@@ -565,3 +565,77 @@ import java.util.Properties as JavaProperties
 
 **已踩三次**：CI 编号 22（probe 模块）、以及 `upstream-baseline` 分支的签名配置两次。
 排查时先看 `build.gradle.kts` 顶部有没有注释 —— fork 的 app 模块里已经写了这个坑。
+
+---
+
+# 2026-11-25 新增约定（B 阶段：容器代码优化 + 测试）
+
+> 这些是**用户在本轮明确要求**的工作方式，与上面规则冲突时以本节为准。
+
+## 规则 11：读写文件一律用工具，不用 shell 拼接
+
+| 操作 | 用什么 |
+| --- | --- |
+| 读文件 | `read`（**不要** `Get-Content` / `cat` 看内容） |
+| 新建/整体重写 | `write` |
+| 局部修改 | `edit`（先 `read` 再改） |
+| 搜索 | `grep` / `glob`（**不要** `Select-String` 找内容） |
+| `pwsh` | 只用于 git / adb / 构建 / 只读校验脚本 |
+
+**例外**：只读的校验脚本（`check-*.mjs`）可以用 `node` 跑；批量机械移动/删行可以用脚本，但**内容写入仍走 `write`/`edit`**。
+
+## 规则 12：不猜测上下文，不节省必要的代码阅读
+
+- 写代码前必须**实际读到**相关声明（变量类型、函数签名、调用点），不能凭 grep 行号推断；
+- 改动 300+ 行或跨 6+ 函数时，**完整读**每个函数再动手（用户明确："对话有空余，不节省"）；
+- 看到可疑行为时先读源码/日志验证，再下结论。
+
+## 规则 13：每批拆分 = 两个职责 + 三件套
+
+| 项 | 要求 |
+| --- | --- |
+| 粒度 | **一批最多两个职责**（用户 2026-11-25 定）；超出就分批 |
+| 三件套 | ① 代码（纯逻辑抽出可测）② `*Test.kt`（纯 JVM）③ 镜像文档（四节） |
+| 命名 | 按**实际行为**命名（例：`AutofillProbes` → `AutofillSuppressor`，因为它改状态，不是只读探针） |
+| 边界 | 只搬实现、不搬触发；上下文靠参数；日志格式一字不改 |
+| 验收 | `kotlin-lint` + `check-imports` + `check-test-fn-names` → CI matrix → 真机 3 项 |
+
+## 规则 14：diag 包结构（诊断/探针的唯一去处）
+
+```
+core/virtualization/diag/
+  ContainerSelfCheck.kt          主动自检（CmdReceiver SELF_CHECK）
+  Reflect.kt                     fieldOf（沿父类查找，唯一实现）
+  dump/GuestMemoryDump.kt        线程栈 / 内存 dex
+  dump/MapsSnapshot.kt           maps 快照
+  trace/InitTrace.kt             方法追踪启停 + 过滤
+  probe/PluginProbes.kt          只读观测
+  probe/HijackProbes.kt          只读观测
+  probe/LoginProbes.kt           登录/认证观测 + 点击包装
+  suppress/AutofillSuppressor.kt 行为抑制（不是探针）
+```
+
+- **`VirtualApplicationManager` 里不再放探针**（4589 → 2337 行）；
+- 自检/探针**不许写 `virtualRoot`**（用户可见目录）——写 app 私有 `cacheDir`；
+- 容器自检与 `probe/`（独立 APK）是两套东西：自检测"容器动作是否可行"，探针测"guest 视角是否一致"。
+
+## 规则 15：CI 与测试的操作口径（2026-11-25 更新）
+
+| 场景 | 做法 |
+| --- | --- |
+| 触发编译 | 仍是一次一个、手动 dispatch（容器 `container-build.yml` / 探针 `probe-build.yml`） |
+| 旧 run 落后于新代码 | `node tools/release/gh-api.mjs --cancel <run-id>` 再 dispatch（用户允许） |
+| 单元测试 | `module-test` 已是**模块级 matrix**；可用 `test_filter` 精确到包 |
+| 测试卡死 | 日志有 `TESTSUITE/TESTSTART/TESTTIME` 打点；**有 TESTSTART 无 TESTTIME = 卡在该测试** |
+| 单元测试失败 | 不严重（依赖限流/测试数据）→ 修测试即可；**容器发包已前置**，产物不受影响 |
+| 提交前 | `kotlin-lint` / `check-imports` / `check-test-fn-names`（毫秒级） |
+
+## 规则 16：能力清单与回归
+
+- `docs/现状/容器能力清单与回归方法.md` 是"能力不能丢"的可执行版本（14 项，含验证命令）；
+- **每批拆分后至少跑 5 项**（探针 diag / stackdump / 宿主写入 / 豁免名单 / breadcrumb 尾部）；
+- **全量回归留到重构最后阶段**（用户决定）。
+
+## 规则 17：`tools/tmp/` 不入库
+
+`tools/tmp/` 已加入 `.gitignore`（含 AOSP 浅克隆副本与临时脚本）。提交时**不要** `git add -A`，用明确路径。
