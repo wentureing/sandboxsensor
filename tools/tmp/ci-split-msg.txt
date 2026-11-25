@@ -1,0 +1,15 @@
+ci: module-test 拆成模块级 matrix job + 打印每个测试耗时
+
+用户 2026-11-25：#42/#44 单 job 串行跑到 8 分钟（#41 同任务只用 85s），明显异常，
+要求"检查测试样例的错误，以及拆分 job"。
+
+## .github/workflows/module-test.yml
+- module-test job 改为 matrix: [":core:virtualization", ":core:hook", ":core:sandbox"]
+  fail-fast=false（一个模块红不影响其它），timeout-minutes 30 -> 15
+- Run module unit tests 改为只跑 matrix.module，step 级 if 支持 inputs.modules 指定子集
+- test_filter 语义不变（--tests + failOnNoMatchingTests=false）
+
+## core/virtualization/build.gradle.kts
+- 加 testOptions.unitTests.all { testLogging.exceptionFormat = FULL }
+- 加 tasks.withType<Test> { afterTest { println("TESTTIME <class>#<test> <ms>ms <result>") } }
+  目的：下一次 CI 直接看出哪个测试类慢，而不是猜

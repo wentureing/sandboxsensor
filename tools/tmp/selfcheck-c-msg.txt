@@ -1,0 +1,19 @@
+refactor(diag): 自检 S3 改写到 app 私有 cacheDir —— 不再污染 virtualRoot
+
+用户 2026-11-25 认为"删除是补救，从一开始就不该写入那个位置"，选择方案 C。
+
+## 问题
+S3 原来把临时文件写到 `virtualRoot/selfcheck/w/f.txt`：
+- `virtualRoot` 是用户/容器 Files 页面可见的目录（实机看到 apks/apps/data/selfcheck/snapshots）；
+- 即使 finally 删除，也不该把自检痕迹放进可见目录。
+
+## 改动
+- ContainerSelfCheck: `sandboxRoot` -> `writeRoot`；S3 名称改为「规则翻译后可写」，
+  断言 `startsWith(writeRoot)`；cleanup 删文件 + 两级目录
+- VirtualEngine.selfCheck(): 传 `File(context.cacheDir, "selfcheck")`
+- ContainerSelfCheckTest C2: 改为「规则翻译后可写且不留痕迹」，断言 writeRoot 不存在
+- 镜像文档：偏差登记新增「为什么不在 virtualRoot」；约束与坑第 4 条同步
+
+## 设计说明
+目标目录选哪里不影响验证力：只要路径经过 translate()，验证的就是「规则翻译 + 真的能写」。
+「写入落沙箱」这条能力由探针 J08/F01/F09/F14 覆盖，容器自检不重复证明。

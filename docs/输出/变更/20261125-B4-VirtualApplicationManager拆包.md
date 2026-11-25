@@ -40,7 +40,7 @@
 | `core/virtualization/.../lifecycle/diag/GuestMemoryDump.kt` | **新增** | 290 行（object 内三个函数） |
 | `core/virtualization/.../lifecycle/VirtualApplicationManager.kt` | 修改 | −272 行；2 个调用点改为 `GuestMemoryDump.xxx`；新增 1 个 import |
 | `core/virtualization/src/test/.../diag/GuestMemoryDumpTest.kt` | **新增** | G1–G5（`le32`，纯 JVM） |
-| `docs/代码镜像/core/virtualization/lifecycle/diag/GuestMemoryDump.md` | **新增** | 规则 7 四节（含 `DiagSuspendGate` 的坑） |
+| `docs/代码镜像/core/virtualization/diag/GuestMemoryDump.md` | **新增** | 规则 7 四节（含 `DiagSuspendGate` 的坑） |
 
 ## 五、风险
 

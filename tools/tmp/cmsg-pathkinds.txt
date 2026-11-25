@@ -1,0 +1,39 @@
+refactor(model): 路径族配置集中为数据表 PathKinds —— 14 族三种形态唯一来源
+
+## 为什么
+路径知识写在 4 处（synthetic* 7 个函数 / VirtualContext 13 处分支 /
+PackageManagerProxy / setupAppRedirections 16 条规则），改一处漏三处。
+本次只做**数据层收敛**，不接线消费方 —— 行为零变化。
+
+## 新增
+core/model/.../PathKinds.kt
+  RedirectOwner(APP|PATH_FIDELITY) + PathKindSpec(14 族)
+  每族：synthetic / sandboxRel / hostForms(含与不含尾斜杠) / coveredBy / owner
+  纯函数：rulesFor(owner,pkg,sandboxDataDir,apkPath) / hostFallbackRules /
+         EXTERNAL_ROOT_FORMS / kindsWithoutHostForms
+  不写日志、不建目录、无状态
+
+core/hook/src/test/.../path/PathKindsTest.kt（K1–K7）
+  K1 表覆盖 14 族且不重复
+  K2 合成路径与 VirtualConstants.synthetic* 逐字相等
+  K3 沙箱相对位置与 SandboxManager 布局一致
+  K4 APP 规则对 == 改造前手写的 16 条（逐对相等）
+  K5 APK/LIB 属于 pathFidelity 入口（2 条；缺 apkPath 时跳过）
+  K6 每族都有 hostForms 或 coveredBy（替代 T39 的事后检查）
+  K7 共享存储根独立维护、不含包名
+
+## 修改
+ProcessSlot.kt      VirtualConstants 的 7 个 synthetic* 改为委托 PathKinds（字符串不变）
+PathSpoofConfig.kt  KNOWN_KINDS 由 PathKind.entries 派生（消除第三处重复）
+
+## 日志约束（用户明确要求）
+数据表不产生任何日志；消费方接线只允许 DebugTrace（debug 才进产物）；
+debug-trace.log 不得被 hook 翻译、不得触发 hook 日志（保留 438eab2 的过滤）。
+
+## 已知缺口（不在本次范围）
+匹配语义仍是纯前缀：合成路径的「根」形态（/data/user/0/<pkg>）无规则覆盖，
+T39/T41 仍红。见 docs/输出/记录/记录-T39-T41-族根路径无规则.md。
+
+## 验证
+kotlin-lint 通过（12 文件）；check-imports 通过（11 文件 / 31 类型）
+规则数契约：APP 14 + PATH_FIDELITY 2 + hostFallback 2 = 18

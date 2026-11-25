@@ -1,0 +1,30 @@
+fix(path): 族根匹配语义（ROOT_FORM）—— T39/T41 转绿，Java 与 C++ 同步
+
+## 为什么
+`syntheticDataDir(pkg)` = `/data/user/0/<pkg>`（无尾斜杠，AOSP 形态），而规则注册的是带尾斜杠的
+前缀 `/data/user/0/<pkg>/` → startsWith 不成立 → 族根不被翻译 → T39/T41 红。
+根因与三个方案的比较见 docs/输出/记录/记录-T39-T41-族根路径无规则.md。
+
+## 修法（方案 A：扩匹配语义，不加规则）
+以 '/' 结尾的规则**同时拥有自己的根形态**（去掉尾斜杠的那个字符串）：
+- 命中条件：path == from.dropLast(1)
+- 有效长度：from.length - 1（参与最长匹配）
+- 返回：to.trimEnd('/')
+- 平局：真正的前缀优先（`/sdcard` 与 `/sdcard/` 同时存在时的确定性）
+
+## 改动（Java 与 C++ 必须同提交，否则层间分叉）
+- NativeHookBridge.translatePath：ROOT_FORM 判定 + tie-break + 根命中返回去斜杠目标
+- native-hook.cpp redirect_path：同一语义（新增 trim_trailing_slashes）
+
+## 测试
+- T42（新增）族根不吃兄弟包：/data/user/0/mark.via.pro 原样返回
+- T43（新增）族根与子项父子一致：translatePath(dataDir) + "/files" == translatePath(dataDir/files)
+- H5 调整对照包：via 已从内置白名单移入豁免名单，改用 CM_PACKAGE + 运行时加豁免
+
+## 不变
+- 规则集合不变 → getPathRedirectSnapshot() 仍可用于 B 阶段 diff 判据
+- T9（带尾斜杠输入返回带斜杠目标）、T11（无斜杠 key 仍可作为前缀）、T15（兄弟包）行为不变
+
+## 验证
+kotlin-lint 通过；module-test(:core:hook :core:sandbox) 待跑。
+真机判据：File(getDataDir()).exists() 为 true；via 主页/离线列表不回退。

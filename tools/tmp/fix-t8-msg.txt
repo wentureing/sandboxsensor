@@ -1,0 +1,23 @@
+fix(test): InitTraceTest T8 死循环根因 —— recSize 写错块头偏移 + 生产代码缺防御
+
+## 根因（用户从 TESTSTART 日志定位到 T8）
+TESTSTART InitTraceTest#T8 之后再无输出 -> 卡在 T8。
+
+测试构造 buildTrace 把 recSize 写在块头 byte[16]，
+但生产 InitTrace.filter 读的是 u32(data, blobOff + 16)，
+其中 blobOff = textEnd + 5（"SLOW" 起点），所以实际读块头 byte[12]。
+-> 读到 0 -> collectRecords 里 off += 0 -> 死循环 -> CI 卡 8 分钟。
+
+Python 重放验证：
+  修正前：recSize = 0, loopIters = 10001（判定 DEAD LOOP）
+  修正后：recSize = 14, loopIters = 2
+
+## 修复
+1) 测试：buildTrace 改为 head[12..15] 写 recSize（并注释说明原因）
+2) 生产健壮性：collectRecords 增加 `if (recSize <= 0) return FilterResult(empty, 0)`
+   这不仅是测试问题——损坏/伪造的 trace 会让 filter 后台线程死循环，真机上表现为诊断静默挂住
+3) 新增 T10：recSize=0 必须立即返回（回归钉）
+
+## 定位手段（保留）
+build.gradle.kts 的 TESTSTART / TESTSUITE / TESTTIME 打点保留，
+下次卡死能直接看到"有 TESTSTART 无 TESTTIME"的那一项。

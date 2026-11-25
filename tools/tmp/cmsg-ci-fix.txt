@@ -1,0 +1,13 @@
+fix(binder): 修 CI 编译错误 —— credentialProtectedDataDir 在 android-35 SDK 里不是 public
+
+实测 CI 失败（45566662557）：
+
+  e: PackageManagerProxy.kt:756:17 Unresolved reference 'credentialProtectedDataDir'
+
+原因：ApplicationInfo 的 credentialProtectedDataDir 在 android-35 SDK 里不是 public
+（deviceProtectedDataDir 可以，只有它不行）。
+
+这是上一轮「发现 AOSP 有这几个字段就直接加两行」造成的 —— 典型的追加式修补，
+没验证 SDK 可见性。
+
+修法：改为反射 getDeclaredField + isAccessible，设不上就跳过（该字段用得很少）。

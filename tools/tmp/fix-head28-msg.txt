@@ -1,0 +1,22 @@
+fix(test): InitTraceTest 块头长度 32->28 —— T7/T8 断言 expected 1/2 but was 0
+
+#49 结果：56 tests, 2 failed（不再卡死，1m33s）
+  T7 collectRecords 只保留 ENTER 且命中 key 的记录 -> expected:<1> but was:<0>
+  T8 sampled=true 时保留 exit 记录 -> expected:<2> but was:<0>
+  TESTTIME ... T8 9ms FAILURE（说明 recSize 已能读到 14，不再是死循环）
+
+## 根因
+生产布局是：文本头 -> *end\n -> "SLOW"(4 字节) -> 块头 28 字节 -> 14 字节记录。
+  recSize 位于块头偏移 12（生产读 blobOff + 16 = 4 + 12）
+  记录起点 = blobOff + 32（4 + 28）
+我构造时按块头 32 字节写，导致记录起点后移 4 字节 -> mid/tid 全错 -> 0 行命中。
+
+Python 重放验证：
+  块头 32：recSize=14 但 total 偏移错（先前 0 行）
+  块头 28：recSize=14, total=2（T8），循环 2 次
+
+## 修改
+- InitTraceTest.buildTrace: ByteArray(32) -> ByteArray(28)，注释写清布局
+- docs/代码镜像/.../InitTrace.md 增加「trace 字节布局」一条（含两种错误构造方式的后果）
+
+T10（recSize=0 立即返回）仍保留，作为死循环回归钉。

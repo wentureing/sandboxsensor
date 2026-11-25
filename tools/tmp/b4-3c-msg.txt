@@ -1,0 +1,40 @@
+refactor(virtualization): B4-3c 抽出方法追踪工具（InitTrace）
+
+VirtualApplicationManager 3820 -> 3504 行（本批 -316 行）。
+
+## 新增 lifecycle/diag/InitTrace.kt
+搬运（原样）：
+- stopBeforeStart(dir, tag)   点击 trace 前的"先停再起"（同设备二次 start 是静默 no-op）
+- startInit()                 64MB/20s init trace
+- startLoad()                 256MB/20s load trace（loadStarted 必须在 stopBeforeStart 之后置位）
+- filter(traceFile, dir, outName, tag, sampled)  二进制 trace -> 可读日志
+状态：started / stoppedByClick / loadStarted / loadStoppedByClick / loadFiltered（@Volatile，原样）
+
+抽出纯函数（可测）：
+- textEnd(data): Int                 找 *end\n
+- parseMethods(text): Map<Int,String> 解析 *methods 段
+- isSlow(data, off) / u32(data, off) 块头与字节序
+- matchesAny(name, keys)             关注前缀判定
+- collectRecords(...): FilterResult  按 14 字节记录遍历，产出 t2/tid/name
+
+## 修改 VirtualApplicationManager（保留触发）
+- bindApplication（CM 包）：startV154InitTrace() -> InitTrace.startInit()
+- 生命周期回调（LoginActivity）：startV156LoadTrace() -> InitTrace.startLoad()
+- 点击包装器：v155StopBeforeStart -> InitTrace.stopBeforeStart；filterV154Trace -> InitTrace.filter
+- 删除原顶层函数、状态变量与其 KDoc（72-388）；新增 import InitTrace
+
+## 行为等价（已核对原文）
+- 状态变量 5 个 @Volatile Boolean、初值 false，与原文 96-115 一致
+- trace 格式按原文注释：*methods(hexId\tclass\tmethod) -> *end -> "SLOW" + 14 字节记录
+  <u16 tid, u32 mid, u32 t1, u32 t2>，mid & ~3 取方法 id，低 bit 为 exit
+- recSize 读自 blobOff+16；记录从 blobOff+32 起
+- 日志字符串（v155-trace/v156-load-trace/v155-filter done ...）逐字保留
+
+## 测试 InitTraceTest T1-T9（纯 JVM，构造真实 trace 字节）
+T1/T2 textEnd 命中与缺失 / T3/T4 parseMethods 正常与畸形 / T5 isSlow+u32 /
+T6 matchesAny / T7 collectRecords 只留 ENTER 且命中 / T8 sampled=true 保留 exit /
+T9 无 SLOW 与 recSize 读取
+
+## 静态
+kotlin-lint 29 文件通过；check-imports 仅 1 处既有误报（LifecycleRecorder）；
+check-test-fn-names 通过。

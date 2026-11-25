@@ -201,6 +201,26 @@ if (args[0] === '--dispatch') {
     console.error(r.body.toString('utf8').slice(0, 400));
     process.exit(1);
   }
+} else if (args[0] === '--cancel') {
+  // 取消正在跑的 run：node tools/release/gh-api.mjs --cancel <run-id>
+  // 用途：代码/配置已更新后，立即停掉旧 run 再触发新的（用户 2026-11-25 允许）。
+  const runId = args[1];
+  if (!runId) {
+    console.error('usage: gh-api.mjs --cancel <run-id>');
+    process.exit(2);
+  }
+  const r = await request(
+    'api.github.com',
+    `/repos/wentureing/sandboxsensor/actions/runs/${runId}/cancel`,
+    { Authorization: `Bearer ${token()}`, 'Content-Type': 'application/json' },
+    'POST',
+    ''
+  );
+  console.log(`cancel run ${runId} -> HTTP ${r.status}`);
+  if (r.status !== 202 && r.status !== 204) {
+    console.error(r.body.toString('utf8').slice(0, 300));
+    process.exit(1);
+  }
 } else if (args[0] === '--asset') {
   // 下载 apk-latest 里的某个 asset：node tools/release/gh-api.mjs --asset <name> [out]
   const name = args[1];

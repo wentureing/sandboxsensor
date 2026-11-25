@@ -1,0 +1,70 @@
+feat(sandbox): 补齐 external 目录合成（3 个）+ syntheticDataDir 专属文档
+
+## 一、白名单当前内容（回答用户问题 1）
+
+core/model/.../ProcessSlot.kt：
+
+    private val PATH_FIDELITY_WHITELIST: Set<String> = setOf(
+        CM_PACKAGE,      // com.greenpoint.android.mc10086.activity
+        "mark.via",      // 2026-11-25 加入，验证 file:// 与 WebView MIME
+    )
+
+只有这两个包走 pathFidelity。加包名到集合即可启用。
+
+## 二、补齐三个 external 目录合成（用户问题 2）
+
+之前 pathFidelity 只覆盖 data 目录，external 三个方法**没有分支**，仍返回沙箱路径。
+本次补齐：
+
+  getExternalFilesDir(type)
+      -> /storage/emulated/0/Android/data/<pkg>/files[/type]
+  getExternalCacheDir()
+      -> /storage/emulated/0/Android/data/<pkg>/cache
+  getObbDir()
+      -> /storage/emulated/0/Android/obb/<pkg>
+
+新增 VirtualConstants：
+
+  syntheticExternalDir(pkg)       /storage/emulated/0/Android/data/<pkg>
+  syntheticExternalCacheDir(pkg)  /storage/emulated/0/Android/data/<pkg>/cache
+  syntheticObbDir(pkg)            /storage/emulated/0/Android/obb/<pkg>
+
+每条分支都先调 sandboxManager 确保沙箱目录存在，再返回合成路径 ——
+所以"假路径存在、真目录也建好"，两者由规则连起来。
+
+规则侧无需改动：setupAppRedirections 已经在 2026-11-25 修正为
+  /storage/emulated/0/Android/data/<pkg>/  -> <sandbox>/sdcard/Android/data/<pkg>/
+  /storage/emulated/0/Android/obb/<pkg>/   -> <sandbox>/sdcard/Android/obb/<pkg>/
+（含无尾斜杠变体）
+
+getExternalFilesDirs / getExternalCacheDirs / getObbDirs 是单数方法的转发，
+自动跟随，不需要单独改。
+
+## 三、未覆盖 / 不需要覆盖
+
+| API | 处置 |
+| --- | --- |
+| getExternalMediaDirs() | 未加分支（@Deprecated，用得少），仍暴露 |
+| Environment.getExternalStorageDirectory() | **不需要改**：返回共享存储根 /storage/emulated/0，真机就是这个值，不含包名 |
+| Environment.getExternalStoragePublicDirectory() | 同上 |
+| MediaStore.* | **不需要改**：走 ContentResolver + content:// URI，不返回绝对路径；_data 列在 Android 10+ scoped storage 下第三方已不可用 |
+
+## 四、文档（用户问题 3）
+
+新增 docs/架构/架构-syntheticDataDir.md —— syntheticDataDir 及同族 6 个函数的唯一说明：
+
+  1 用途：为什么不直接用沙箱路径（暴露宿主包名 + virtual/data + instanceId）
+  2 六个合成函数清单（含 SYNTHETIC_INSTALL_TOKEN=VmK8x2 必须与 /proc/self/maps 一致）
+  3 可用的层级：11 个已覆盖 API / 1 个未覆盖 / 4 个不需要覆盖（含理由）
+  4 现状：白名单内容、为什么最初只对一个包、三个已知缺陷
+  5 性能代价：≈0（真正的开销在 ensureDir 的 isDirectory，不是 pathFidelity）
+  6 一条完整数据流（getExternalFilesDir -> listFiles -> translatePath -> 沙箱）
+
+AGENTS.md 增加一节「路径合成：syntheticDataDir / pathFidelity」，
+指向该文档，改这几个函数前必读。
+
+## 五、静态检查
+
+  node tools/lint/kotlin-lint.mjs _ref/ShitJumpingVM/core/model _ref/ShitJumpingVM/core/sandbox
+  -> 检查通过（14 个文件）
+  括号平衡：ProcessSlot.kt 4/4，VirtualContext.kt 113/113

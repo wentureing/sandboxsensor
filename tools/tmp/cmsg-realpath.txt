@@ -1,0 +1,71 @@
+feat(sandbox): 内容目录改用真实沙箱路径 —— WebView 的 isolated 进程读不到假路径
+
+## 一、问题
+
+via 主页空白：via 拼 getFilesDir() + "homepage2.html" -> file:///data/user/0/mark.via/files/homepage2.html
+该文件在真机上不存在。真实文件在
+  /data/user/0/com.nextvm.app/files/virtual/data/<inst>/files/homepage2.html  (6333 字节)
+
+## 二、为什么路径翻译救不了 WebView（两层）
+
+1) 渲染进程不在 hook 范围
+   13698  uid=10373  mark.via
+   18326  uid=99613  com.google.android.webview:sandboxed_process0:...:0
+    4308  webview_zygote            <- 18326 的父进程
+   该进程 hook 日志完全为空（无 installJavaIoHooks / NextVM 记录）
+
+2) RegisterNatives 够不到 loadUrl
+   WebView.loadUrl 是 Java 方法（boot framework.jar）
+   AwContents 在 webview apk 的 dex 里 native 方法数 = 0（实测 dexdump）
+   chromium 用 JNI_OnLoad 动态注册，我们拿不到 method table
+   shouldInterceptRequest 按官方设计只拦 http/https
+
+## 三、关键证据：isolated 进程能读宿主私有目录
+
+  W18:  file:///data/user/0/com.nextvm.app/files/wvprobe18.html  -> ERR_FILE_NOT_FOUND（文件不存在）
+  W35a: file:///data/user/0/com.app.hider.master.pro.cn/gaia/data/user/0/com.sandbox.probe/files/wvprobe_bom.html -> WVPAGE_OK
+
+W35a 是 gaia 的形态：路径落在 hostPkg 私有目录，isolated 读得到。
+沙箱文件的真实位置就在容器私有目录里，所以只要给真路径就能读到。
+
+## 四、改动
+
+VirtualContext 新增：
+
+  private val contentPathsUseReal: Boolean = false
+  private fun contentDir(sandboxDir: File, synthetic: () -> File): File =
+      if (pathFidelity && !contentPathsUseReal) synthetic() else sandboxDir
+
+改成走 contentDir 的方法（内容目录 -> 真实路径）：
+  getFilesDir / getCacheDir / getCodeCacheDir / getNoBackupFilesDir /
+  getExternalFilesDir / getExternalCacheDir / getObbDir / getExternalMediaDirs
+
+保留合成路径（不变）：
+  getDataDir()              -> /data/user/0/<pkg>
+  ApplicationInfo.dataDir   -> 合成路径（PackageManagerProxy）
+
+## 五、为什么这样保留是合理的
+
+两件事分开：
+  * 文件真的能被读写（含 WebView）-> 真路径（isolated 只认真实存在的路径）
+  * 让 guest 觉得装在真机上（反双开）-> dataDir 合成路径（这类检测看 getDataDir/ApplicationInfo.dataDir）
+
+## 六、代价（明确接受，暂不修复）
+
+guest 自己看到的 getFilesDir() 现在含宿主包名 + virtual/data + instanceId。
+能彻底修的路只有 hook WebView.loadUrl（需维护 per-API 的 ArtMethod 偏移）或拦 file://
+（官方不支持），都太贵。用户已确认暂不修复，未来内置 WebView 后再改回合成路径。
+
+## 七、via 的行为记录（反编译实测）
+
+  WebView.loadUrl(String)            2 处  Ld9/q;.i3（直调 WebView）、Lc8/ua;.n1（经包装类）
+  shouldInterceptRequest             1 处  Ld9/q$c（两个重载），拦不到 file://
+  setAllowFileAccess                 2 处
+  setAllowFileAccessFromFileURLs     1 处
+  setAllowUniversalAccessFromFileURLs 1 处
+
+via 已经开启三个 allowFileAccess —— WebView 层面不阻止 file://，问题纯粹是文件不存在。
+所以只要给真实存在的路径，加载就能成功，不需要改 via。
+
+文档：docs/架构/架构-WebView假路径换真路径.md
+静态检查：kotlin-lint 通过（7 个文件），括号平衡 106/106

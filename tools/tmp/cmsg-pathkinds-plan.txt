@@ -1,0 +1,22 @@
+docs(变更): 目录配置集中管理 —— 数据表 PathKinds 落地（容器 b561921）
+
+## 计划
+docs/输出/变更/20261125-目录配置集中管理.md
+目标：路径族知识只写一处；规则生成结构化；结构上不可能漏；
+消除 PathSpoofConfig.KNOWN_KINDS 第三处重复。
+
+## 落地产物
+- docs/代码镜像/core/model/PathKinds.md（规则 7 四节 + 规则数契约 + 日志约束）
+- 实际变更章节：4 文件 / +413-16，与计划无差异
+
+## 本轮明确不做
+不接线 VirtualContext / PackageManagerProxy / NativeHookBridge；
+不改匹配语义（T39/T41 族根问题另案）；不动 C++；多实例暂停。
+
+## 日志系统（用户要求，已写入多份文档）
+数据表不产生日志；消费方接线只允许 DebugTrace（debug 才进产物）；
+debug-trace.log 不得被 hook 翻译、不得触发 hook 日志（保留 438eab2 过滤）。
+本节同时补进 架构-hook实现现状-代码为准.md §七 自查清单第 6 条。
+
+## 验证
+kotlin-lint / check-imports 通过；module-test(:core:hook) 待跑。

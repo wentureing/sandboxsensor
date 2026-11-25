@@ -1,0 +1,31 @@
+feat(diag): 容器自带自检 SELF_CHECK（主动行为断言，CI 只跑纯逻辑）
+
+用户在 2026-11-25 批准：允许"容器自带、cmdrec 可触发"的自检，重点是直接测容器行为与输出。
+并明确：JVM 不可测的部分可以加入，但 CI 不执行，只有收到命令后执行。
+
+## 新增 core:virtualization/diag/ContainerSelfCheck.kt（纯逻辑，可测）
+6 项主动检查：
+  S1 加临时规则 /selfcheck/in/ -> /selfcheck/out/，断言 translate 命中（finally 删除）
+  S2 删除后断言不再命中（证明删得掉，规则不泄漏）
+  S3 临时规则指向 sandboxRoot/selfcheck/w/，真的写文件，断言落在沙箱内（finally 清理）
+  S4 未注册路径必须原样返回（不误伤）
+  S5 向 debug-trace.log 追加并断言长度增长；无 diag 文件时 skipped 视为通过（release）
+  S6 path_spoof.conf 存在且含 [豁免名单]
+输出：hookcheck ok=N fail=M S1:ok ...
+
+## 新增 VirtualEngine.selfCheck()（Android/native，CI 不执行）
+- 把 NativeHookBridge 适配成 PathProbe（add/remove/translate/count/nativeAvailable）
+- sandboxRoot = virtualRoot（未初始化则回落 filesDir/VIRTUAL_DIR）
+- 结果写 checks.log 一行 + 由 CmdReceiver 打 logcat
+
+## 新增 CmdReceiver.ACTION_SELF_CHECK = com.nextvm.cmd.SELF_CHECK
+  adb shell am broadcast -n com.nextvm.app/.CmdReceiver -a com.nextvm.cmd.SELF_CHECK
+  -> logcat: SELF_CHECK -> hookcheck ok=6 fail=0 S1:ok ...
+
+## 测试 ContainerSelfCheckTest C1-C7（CI 执行）
+规则命中/移除后清空 / 写入落沙箱且清理 / 未知路径不改 / 诊断通道增长 /
+无诊断文件 skipped / 配置缺失或缺段失败 / report 汇总格式
+
+## 静态
+kotlin-lint 31 文件 + CmdReceiver 1 文件通过；
+check-imports 仅 1 处既有误报（LifecycleRecorder）；check-test-fn-names 通过。

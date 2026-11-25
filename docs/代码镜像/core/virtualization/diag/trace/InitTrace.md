@@ -1,7 +1,7 @@
 # InitTrace（core:virtualization / lifecycle/diag）
 
-- 代码：`core/virtualization/src/main/java/com/nextvm/core/virtualization/lifecycle/diag/InitTrace.kt`
-- 测试：`core/virtualization/src/test/java/com/nextvm/core/virtualization/lifecycle/diag/InitTraceTest.kt`（T1–T9）
+- 代码：`core/virtualization/src/main/java/com/nextvm/core/virtualization/diag/trace/InitTrace.kt`
+- 测试：`core/virtualization/src/test/java/com/nextvm/core/virtualization/diag/trace/InitTraceTest.kt`（T1–T9）
 - 来源：从 `VirtualApplicationManager` 顶层抽出（v155/v156 方法追踪，B4-3c）
 - 日期：2026-11-25
 

@@ -1,7 +1,7 @@
 # GuestMemoryDump（core:virtualization / lifecycle/diag）
 
-- 代码：`core/virtualization/src/main/java/com/nextvm/core/virtualization/lifecycle/diag/GuestMemoryDump.kt`
-- 测试：`core/virtualization/src/test/java/com/nextvm/core/virtualization/lifecycle/diag/GuestMemoryDumpTest.kt`（G1–G5）
+- 代码：`core/virtualization/src/main/java/com/nextvm/core/virtualization/diag/dump/GuestMemoryDump.kt`
+- 测试：`core/virtualization/src/test/java/com/nextvm/core/virtualization/diag/dump/GuestMemoryDumpTest.kt`（G1–G5）
 - 来源：从 `VirtualApplicationManager` 机械抽出（`docs/输出/变更/20261125-B4-VirtualApplicationManager拆包.md`）
 - 日期：2026-11-25
 

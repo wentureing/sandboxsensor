@@ -1,0 +1,73 @@
+feat(model): 路径欺骗豁免机制（A 阶段）—— 豁免最高优先级，CmdReceiver 可编辑
+
+## 语义（见 docs/设计/设计-澄清-欺骗与隔离与合成路径.md）
+
+豁免 = 关掉「路径形态欺骗」（不产生合成路径），**保留沙箱隔离**（规则仍注册）。
+两者是独立目标：
+  ③ 合成路径 是 ② 路径形态欺骗 的手段
+  ① 沙箱隔离 不依赖 ②③
+
+所以豁免后：
+  getFilesDir() / getDataDir() / ApplicationInfo.dataDir -> 全部真实沙箱路径
+  规则表                                                 -> 照常注册，I/O 仍落沙箱
+
+## 新增 3 个文件（core/model）
+
+  PathKind.kt          14 个路径族的分类枚举（纯分类，不承载模板）
+  PathSpoofConfig.kt   配置文件读写：<containerDataDir>/files/path_spoof.conf
+                       行式 key=value + [节] + # 注释，可读性优先
+  PathPolicy.kt        唯一判断入口，豁免优先级全局唯一：
+                         1 豁免 -> false
+                         2 族开关 off -> false
+                         3 在 PATH_FIDELITY_WHITELIST -> true
+                         4 其余 -> false
+                       isRedirectionEnabled 恒 true（隔离不受豁免影响）
+
+## 修改 3 个文件
+
+  ProcessSlot.kt        isPathFidelityGuest 先查豁免，命中则一律 false
+  NextVmApplication.kt  onCreate 里 PathSpoofConfig.load(filesDir)（启动读一次）
+  CmdReceiver.kt        新增三条命令 + 常量 + 文档注释
+
+## CmdReceiver 命令
+
+  am broadcast -n com.nextvm.app/.CmdReceiver -a com.nextvm.cmd.SPOOF_EXEMPT_ADD --es pkg mark.via
+  am broadcast -n com.nextvm.app/.CmdReceiver -a com.nextvm.cmd.SPOOF_EXEMPT_REMOVE --es pkg mark.via
+  am broadcast -n com.nextvm.app/.CmdReceiver -a com.nextvm.cmd.SPOOF_EXEMPT_LIST
+
+不实时生效：改完重启容器/guest 才生效（因为 VirtualContext.pathFidelity 是构造时求值的 val）。
+
+配置文件首次生成时把 mark.via 放进豁免名单（本轮验证目标，且它依赖 WebView 加载本地 HTML）。
+
+## 测试：新增 PathSpoofPolicyTest（10 个用例）
+
+  H1 首次加载生成模板且默认豁免 mark_via
+  H2 豁免增删往返（含重复添加返回 false）
+  H3 族开关往返
+  H4 文件损坏时安全回落（不抛，全部不豁免/全部开）
+  H5 豁免优先于白名单（mark.via 原本在白名单，豁免后 isPathFidelityGuest=false）
+  H6 豁免后 14 个族的 isSpoofEnabled 全部 false   <- 「路径不转换」的核心断言
+  H7 白名单未豁免仍合成（证明 H6 不是假阳性）
+  H8 族开关优先于白名单
+  H9 豁免不影响隔离（isRedirectionEnabled 恒 true） <- 「写入仍可拦」的策略契约
+  H10 isLoaded 反映加载状态
+
+老测试 NativeHookBridgePathTest（T1-T41）不受影响：它只测 translatePath 与
+setupAppRedirections，不依赖 isPathFidelityGuest。
+
+## 镜像文档（规则 7）
+
+  docs/代码镜像/core/model/PathSpoofConfig.md
+  docs/代码镜像/core/model/PathKind.md
+  docs/代码镜像/core/model/PathPolicy.md
+
+## 静态检查
+
+  kotlin-lint 通过（19 个文件）
+  括号平衡：CmdReceiver 74/74、NextVmApplication 13/13、ProcessSlot 5/5、
+           PathSpoofConfig 24/24、PathPolicy 2/2、PathSpoofPolicyTest 15/15
+
+## A 阶段的行为保证
+
+**空豁免名单时行为与改动前完全一致**（PathPolicy 第 3 条回落到原白名单判断）。
+B 阶段（PathKinds 数据表 + 三个消费方查表）另起一个 commit。

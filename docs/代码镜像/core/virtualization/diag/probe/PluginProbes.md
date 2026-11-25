@@ -1,7 +1,7 @@
 # PluginProbes（core:virtualization / lifecycle/diag）
 
-- 代码：`core/virtualization/src/main/java/com/nextvm/core/virtualization/lifecycle/diag/PluginProbes.kt`
-- 测试：`core/virtualization/src/test/java/com/nextvm/core/virtualization/lifecycle/diag/PluginProbesTest.kt`（P1–P5）
+- 代码：`core/virtualization/src/main/java/com/nextvm/core/virtualization/diag/probe/PluginProbes.kt`
+- 测试：`core/virtualization/src/test/java/com/nextvm/core/virtualization/diag/probe/PluginProbesTest.kt`（P1–P5）
 - 来源：从 `VirtualApplicationManager` 抽出（v116–v123 插件框架探针，B4-3a）
 - 日期：2026-11-25
 

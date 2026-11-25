@@ -1,7 +1,7 @@
 # MapsSnapshot（core:virtualization / lifecycle/diag）
 
-- 代码：`core/virtualization/src/main/java/com/nextvm/core/virtualization/lifecycle/diag/MapsSnapshot.kt`
-- 测试：`core/virtualization/src/test/java/com/nextvm/core/virtualization/lifecycle/diag/MapsSnapshotTest.kt`（G1–G9）
+- 代码：`core/virtualization/src/main/java/com/nextvm/core/virtualization/diag/dump/MapsSnapshot.kt`
+- 测试：`core/virtualization/src/test/java/com/nextvm/core/virtualization/diag/dump/MapsSnapshotTest.kt`（G1–G9）
 - 来源：从 `VirtualApplicationManager` 抽出（v59 REAL maps 快照，B4-2）
 - 日期：2026-11-25
 

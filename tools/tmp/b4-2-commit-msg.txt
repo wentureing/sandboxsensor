@@ -1,0 +1,25 @@
+refactor(virtualization): B4-2 抽出 v59 REAL maps 快照（取数与纯逻辑分离）
+
+本批一个职责：内核视角 maps 快照（v59），VirtualApplicationManager 4156 -> 4089 行。
+
+## 新增 lifecycle/diag/MapsSnapshot.kt
+- class RealSnap(...)                        数据类（原为 VirtualApplicationManager 内部类）
+- MapsSnapshot.parse(text): RealSnap        纯函数：可执行段 / 匿名字节 / 大匿名段 / DexHelper / memfd
+- MapsSnapshot.formatLine(tag, snap, prev)   纯函数：首次全量；后续只算新增（按 @ 后地址比较）
+- MapsSnapshot.dump(filesDir, pid, tag, snap) 写 realmaps-<pid>-<tag>.txt；失败抛出由调用方记日志
+
+## 修改 VirtualApplicationManager（保留触发与装配）
+- realSnap()     = NativeHookBridge.readRealMaps()?.let(MapsSnapshot::parse)   ← 取数（依赖内核通道）留在这里
+- logRealSnap()  = GuestBreadcrumb.log(MapsSnapshot.formatLine(...))
+- dumpRealMaps() = try { MapsSnapshot.dump(File(v59DataDir, "files"), pid, tag, s) } catch { logThrowable }
+
+## 测试 MapsSnapshotTest G1-G9（纯 JVM）
+只累加匿名可执行 / DexHelper+memfd 收集 / 大段边界 / 畸形输入 / 空文本 /
+formatLine 首次与 prev 差分 / null -> UNAVAILABLE / dump 命名与内容
+
+## 为什么这样拆（取数 / 纯逻辑分离）
+依赖 Android 或内核的只有 readRealMaps() 一行；把解析与格式化变成纯函数后，
+这部分从「只能真机看 breadcrumb」变成「纯 JVM 可回归」。
+
+## 静态
+kotlin-lint 25 文件通过；check-imports 仅 1 处既有误报（LifecycleRecorder 全限定名）。
