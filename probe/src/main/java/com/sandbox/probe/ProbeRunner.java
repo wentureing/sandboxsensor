@@ -661,7 +661,6 @@ public final class ProbeRunner {
 
         put("F11", "fs", "host-form list (via read side)", () -> {
             try {
-                String opPkg = ctx.getOpPackageName();
                 File hostOffline = new File(
                         Environment.getExternalStorageDirectory(),
                         "Android/data/" + opPkg + "/files/offline");
