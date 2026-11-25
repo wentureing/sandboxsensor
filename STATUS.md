@@ -64,7 +64,7 @@
 | Java 层文件 I/O 重定向 | ✅ **已打通（v141+v142）**：W38 写 `/sdcard` 成功、文件落沙箱 |
 | v138 进程 Application → guest | ✅ 生效（W32 的 class 是 `ProbeApplication`） |
 | **路径欺骗豁免（A 阶段 `6b5cfbe`）** | ⚠️ **已合并，未装包验证**（豁免=不合成、仍隔离；`path_spoof.conf` + CmdReceiver 三命令） |
-| **合成路径的「族根」翻译** | ❌ **缺口**（T39/T41 红，`/data/user/0/<pkg>` 无规则覆盖） |
+| **合成路径的「族根」翻译** | ✅ **已修**（ROOT_FORM 语义，Java+C++ 同改；CI `45579005086` 全绿） |
 | **native hook 覆盖面（代码为准）** | ✅ 27 条符号（含 `mkdir`/`mkdirat`/`unlink`/`unlinkat`/`rename`）+ 16 个 Java `RegisterNatives` 方法（**默认不装**）。默认生效面是「app 库走沙箱 / Java 层落宿主」的双层不一致，见 `docs/架构/架构-hook实现现状-代码为准.md` |
 | **多实例** | ⏸ **开发暂停**（用户 2026-11-25 决定）。合成路径仍不含 instanceId，B 阶段不要加 slot 签名 |
 | **WebView `file://` MIME** | ❌ **未解决** |
@@ -78,7 +78,7 @@
 | 2 | ~~Java 层重定向是否真的通了~~ | ✅ **已确认打通**（`rules=11` + W38 写 `/sdcard` 成功且落沙箱）。延伸项：扩到 `stat/lstat/readlink/unlink/rename/mkdir` |
 | 3 | 注入位置是否还有漏项 | `setupPathFidelityRedirections` / `registerVirtualSdcard` / `installDeferredProxies` 三项待确认是否也要搬到 guest |
 | 4 | 反检测何时接线 | 需先修 `AntiDetectionEngine` 两个缺陷（`is_path_hidden` 精确匹配、无 `readdir` 过滤） |
-| 5 | **T39/T41：族根路径无规则** | 缺口在 Java `translatePath` 与 C++ `redirect_path` 各一份；推荐「把等于规则去斜杠形式并入匹配语义」（不新增规则）。**改法未实施**，见 `docs/输出/记录/记录-T39-T41-族根路径无规则.md` |
+| 5 | ~~T39/T41：族根路径无规则~~ | ✅ **已修**（`11f23d5` ROOT_FORM + `031eba8` T41 口径；CI `45579005086` 全绿）。匹配定义仍是"前缀 + 族根"两种，`EXACT` 语义留给后续 |
 | 6 | **A 阶段真机验证** | `6b5cfbe` 还没有 APK（最新容器包是 `e6fc56e`）；需 container-build → 装包 → 验 `getDataDir()` 变真、via 主页/离线列表不回退 |
 
 ## 5. 设备与构建环境

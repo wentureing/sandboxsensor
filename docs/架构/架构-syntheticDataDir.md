@@ -7,6 +7,9 @@
 - 消费方：`core/sandbox/.../VirtualContext.kt`（13+ 处 `pathFidelity` 分支）、
   `core/hook/.../NativeHookBridge.kt`（`setupPathFidelityRedirections`）
 - 日期：2026-11-25
+- **核实基准**：容器 `baseline-v150 @ 6b5cfbe`（§3.2 / §4.3 已就地更正）
+- 状态：⚠️ **部分过时** —— `synthetic*` 模板已迁到 `PathKinds`（数据表），本文件保留"用途/边界/缺陷"
+- **多实例开发暂停（2026-11-25 用户决定）**：不要给合成路径加 slot 参数
 
 ---
 
