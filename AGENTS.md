@@ -71,6 +71,12 @@ git remote set-url origin https://github.com/wentureing/sandboxsensor.git
 
 采集一律用：`adb logcat -d -b all -v threadtime > file`（不带 `-c`）。
 
+## 路径合成：syntheticDataDir / pathFidelity
+
+> **改 VirtualConstants.synthetic* 或 PATH_FIDELITY_WHITELIST 之前，必读**
+> **docs/架构/架构-syntheticDataDir.md** —— 那里写了用途、哪些 API 返回合成路径、
+> 哪些不需要合成（Environment / MediaStore）、白名单现状、单实例缺陷与性能代价。
+
 ## 排查问题的第一站：GuestBreadcrumb（不要跳过）
 
 > **遇到「guest 行为异常但没崩溃 / 没栈 / 没日志」时，先看 breadcrumb，再决定往哪查。**
