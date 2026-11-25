@@ -133,6 +133,22 @@
 
 ---
 
+## 四·五、更正（2026-11-25，经用户要求复核后）
+
+> 本文关于 irtualization/diag/DiagnosticsSink 的两处结论**已更正**，
+> 详见 `docs/输出/调研/调研-上游诊断体系可用性验证.md`。
+
+| 本文原结论 | 更正后 |
+| --- | --- |
+| 「两个同名 `DiagnosticsSink` 接口…一个是死代码（最严重）」 | **不是死代码，是「未接线」**。两者是**不同层**：`diag/` 负责把 199 处既有埋点导出成程序流（`onEvent`/`onSnapshot`），`common/diagnostics/` 负责新增可断言的验证点（`onCheck`/`onError`/`onStage`）。**互补，不是重复** |
+| P1「**删除** `diag/DiagnosticsSink.kt`（零风险，-78 行）」 | **撤销**。改为：先给 `core:virtualization` 加测试配置并验证它真能装/能收/能还原（A 步），再评估是否接线 |
+| 「重构时没先查既有 `diag/`」 | 这条**仍然成立**，但结论应是「应该复用它的桥接能力」，不是「它冗余」 |
+
+**复核依据**：
+- 实现完整（`@Volatile` + `inline` 早退 + `install`/`reset`/`isInstalled` 齐全），静态可用
+- 但三处接线全缺：`:core:diagnostics` 模块不存在、`app/src` 无 `debug` 源集、桥接器不存在
+- 外部引用 0 处 → 运行时 `sink` 恒为 `NoOp`
+
 ## 五、一句话结论
 
 > **独立性总体尚可**（`DebugFlags` 是唯一开关源、`diagnostics/` 可测可关），
