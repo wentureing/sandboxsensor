@@ -2,6 +2,7 @@
 
 - 日期：2026-11-25
 - **核实基准**：容器 `baseline-v150 @ 15147f0`；`native-hook.cpp` 7 468 行 / 326 KB
+- 状态：**S1 已落地**（`core/path_rules.{h,cpp}` + 共用 `path_vectors.tsv` + 并行 CI job）；**S4 暂停**（用户 2026-11-25 决定）；S2 待 B2
 - 背景：churn 第 1（接手后 **34 次提交、1 993 行改动**）、**零自动化**（`docs/输出/调研/调研-高频修改热点与测试优先级.md`）
 - 结论先给：**可以构造测试代码，但只抽「纯逻辑」到独立 TU，不造"模拟 Android"的宿主桩**；
   依赖注入留给 B2 拆包一起做；环境差异靠设备内自检补。
@@ -30,7 +31,7 @@ sys/* 一堆 + memfd/prctl/setjmp/ucontext ← 运行时行为
 | **S1 抽纯逻辑 + host 单测** | 把无 Android 依赖的字符串/查表函数抽到 `cpp/core/`，CI 用 g++ 跑向量 | 中（动调用点，不改语义） | `redirect_path` / `is_path_hidden` / maps 过滤 / 合成路径模板 | ✅ **推荐** |
 | S2 依赖注入（hook context） | `real_*` 与规则表收进结构体，`hooked_*` 可注入 stub | 高 | `hooked_open` 等分支 | ⏸ **并到 B2 拆包**，避免两次动刀 |
 | S3 宿主桩整文件编译 | 自制 `jni.h`/`android/log.h` | 很高 | 名义上全覆盖，实际测桩 | ❌ 不做 |
-| **S4 设备内自检（补充）** | debug 开关在 guest 启动跑同一组向量，写 `debug-trace` | 低 | **真实** linker/JNI/libc 环境 | ✅ 与 S1 互补 |
+| **S4 设备内自检（补充）** | debug 开关在 guest 启动跑同一组向量，写 `debug-trace` | 低 | **真实** linker/JNI/libc 环境 | ⏸ **暂停**（用户 2026-11-25；需要装包验证，成本高于当期收益） |
 
 ## 三、S1 的具体设计
 

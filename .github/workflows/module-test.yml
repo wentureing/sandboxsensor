@@ -50,6 +50,40 @@ env:
   CACHE_EPOCH: 'v2'
 
 jobs:
+  # 纯 C++ 逻辑的 host 向量测试（不需要 Android SDK/NDK，ubuntu runner 自带 g++）。
+  # **与 module-test 并行**：不阻塞、也不干扰 Java/Kotlin 单测。
+  # 设计见 docs/架构/架构-C++测试夹具设计.md（S1：抽纯逻辑 + 共用 golden 向量）
+  cpp-core-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout container source
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.repo || 'wentureing/ShitJumpingVM' }}
+          ref: ${{ inputs.ref || 'main' }}
+          path: container
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Compile pure C++ core (host)
+        working-directory: container
+        run: |
+          set -euo pipefail
+          g++ --version | head -n1
+          g++ -std=c++17 -Wall -Wextra -Werror=return-type -O1 \
+            -I core/hook/src/main/cpp/core \
+            core/hook/src/main/cpp/core/path_rules.cpp \
+            core/hook/src/test/cpp/path_rules_test.cpp \
+            -o /tmp/path_rules_test
+
+      - name: Run golden vectors (shared with Kotlin)
+        working-directory: container
+        run: |
+          set -euo pipefail
+          /tmp/path_rules_test core/hook/src/test/resources/golden/path_vectors.tsv
+
   module-test:
     runs-on: ubuntu-latest
     timeout-minutes: 30
