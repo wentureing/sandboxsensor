@@ -69,4 +69,37 @@ git -C _ref/ShitJumpingVM branch -D split/b1-nativehookbridge
 
 ## 八、实际变更
 
-（CI 通过后补）
+### 8.1 B1（容器 `6529879`，CI `45593719794` 绿，已合并 `9e73e32`）
+
+```
+ core/hook/.../PathRuleStore.kt                    | +190（新增）
+ core/hook/.../FileAccessInterceptor.kt            | +114（新增，从 bridge 移出）
+ core/hook/.../NativeHookBridge.kt                 | 1231 -> ~1080 行（17 个函数改委托）
+ core/hook/src/test/.../PathRuleStoreTest.kt       | +139（新增 S1–S8）
+```
+
+门禁结果：G1 分支 `split/b1-nativehookbridge`；G2 两个职责 + 8 个新测试；G3 专属 CI 绿；G4 `--no-ff` 合回 `baseline-v150`。
+
+### 8.2 第二批：VirtualContext 收敛（分支 `split/vc-consolidate`）
+
+用户批准范围"VirtualContext 3 处收敛"。实际收敛 **4 处**（`getDataDir` 与 `getApplicationInfo` 共用同一判据）：
+
+| 位置 | 旧 | 新 |
+| --- | --- | --- |
+| `getDatabasePath` | `if (pathFidelity)` | `shouldUseSyntheticContent(pathFidelity, contentPathsUseReal)`（并用 ensure 后的 `dbDir`，逻辑等价） |
+| `getDir` | `if (pathFidelity)` + 两句 | `contentDir(sandboxDir)`（沙箱目录仍先 `mkdirs`） |
+| `getDataDir` | `pathFidelity \|\| detachedAppInfoEnabled()` | `shouldUseSyntheticMetadata(pathFidelity, detached)` |
+| `getApplicationInfo`（v135 段） | `if (pathFidelity)` | `shouldUseSyntheticMetadata(pathFidelity)` |
+
+新增两个具名判据（包级纯函数，可纯 JVM 测）：
+
+```kotlin
+internal fun shouldUseSyntheticContent(pathFidelity: Boolean, contentPathsUseReal: Boolean): Boolean
+internal fun shouldUseSyntheticMetadata(pathFidelity: Boolean, detachedAppInfo: Boolean = false): Boolean
+```
+
+**行为等价**：`contentPathsUseReal` 当前恒为 `false`，故内部分支与旧 `if (pathFidelity)` 完全一致；
+未来把它设为 true 时，`databases`/`app_dir` 会与 `files` 一样走真路径（语义统一，非本次行为变化）。
+**测试**：`PathWhitelistEffectTest.W8`（内容/元数据判据分离 + 豁免 guest 两条都为假）。
+**debug 面**：未改任何日志；`getDataDir` 诊断计数与输出位置未动。
+

@@ -23,7 +23,8 @@
 | 函数 | 作用 | 关键前提 / 副作用 |
 | --- | --- | --- |
 | `contentDir(sandboxDir, synthetic)` | 内容目录的唯一决策点 | 判据是包级 `shouldUseSyntheticContent`；**不建目录** |
-| `shouldUseSyntheticContent(pathFidelity, contentPathsUseReal)` | 包级 `internal` 纯函数：`pathFidelity && !contentPathsUseReal` | 抽出来是为了**纯 JVM 可测**（`VirtualContext` 需要 Android 运行时才能构造） |
+| `shouldUseSyntheticContent(pathFidelity, contentPathsUseReal)` | 包级 `internal` 纯函数：**内容目录**判据（受"强制真"影响） | 抽出来是为了**纯 JVM 可测**（`VirtualContext` 需要 Android 运行时才能构造） |
+| `shouldUseSyntheticMetadata(pathFidelity, detachedAppInfo)` | 包级 `internal` 纯函数：**元数据**判据（`getDataDir`/`ApplicationInfo` 字段），**不受 `contentPathsUseReal` 影响** | 反双开检测看的是元数据，不能因为"WebView 要读真路径"而暴露 |
 | `getFilesDir` / `getCacheDir` / `getCodeCacheDir` / `getNoBackupFilesDir` / `getDatabasePath` / `getDir` / `getExternalFilesDir` / `getExternalCacheDir` / `getObbDir` / `getExternalMediaDirs` | 走 `contentDir`（先 `sandboxManager.ensureDir`，再决定对外哪条路径） | **有建目录副作用** |
 | `getDataDir` | 不受 `contentPathsUseReal` 影响：`pathFidelity || detachedAppInfoEnabled()` 才合成 | 反双开检测最常看这里 |
 | `getApplicationInfo` | 返回副本（v140）并按 `detached` 决定 `dataDir` | `detachedAppInfoEnabled()` 只对 `com.sandbox.probe` 生效 |
@@ -39,6 +40,7 @@
 | 4 | `detachedAppInfoEnabled` 只对探针包生效 | 受控实验（W36/W37）需要假 dataDir | 中性偏差 | `Dbg/appInfo detached=` |
 | 5 | `pathFidelity` / `contentPathsUseReal` 都是 **构造时求值** 的 `val` | 避免每次 `get*Dir()` 都查策略 | 中性偏差 → 改配置**必须重启** | `SPOOF_EXEMPT_*` 命令输出"重启后生效" |
 | 6 | `contentPathsUseReal` 与 `PathPolicy` 语义重叠 | 前者全局硬编码，后者 per-guest 可配置；B 阶段应收敛为查 `PathPolicy` | **待修偏差** | W6 已把判据隔离成一处，接线时只改 `shouldUseSyntheticContent` |
+| 7 | 内容判据与元数据判据**分成两个函数** | WebView 需要内容目录是真路径；反双开检测需要元数据保持伪装 —— 两者不能共用一个开关 | 必要偏差 | `W8`（两条判据分离 + 豁免 guest 都为假） |
 
 ## 约束与坑
 
