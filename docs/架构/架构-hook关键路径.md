@@ -201,7 +201,8 @@ handleMessage
 | 旧文档说 | 现状 |
 | --- | --- |
 | `ActivityThreadHook` 2133 行 | **1755 行**（v151–v156 拆出 4 个模块到 `engine/activitythread/`） |
-| L4 Java 层文件 API「Phase 1 是空的，`hookFileClass()` 只打日志」 | **已实现** `JavaIoHooks`（v148，RegisterNatives `libcore.io.Linux.open/access`），但**默认关闭**：`libjavacore.so` 无 `Linux_open` 导出 → 无法 dlsym 原实现 → 必然偏差 |
+| L4 Java 层文件 API「Phase 1 是空的，`hookFileClass()` 只打日志」 | **已实现** 16 个 `RegisterNatives` 方法（`libcore.io.Linux` 8 个 + `java.io.UnixFileSystem` 8 个），但**默认关闭**：`debug.nextvm.javaIo=0`。完整清单见 `架构-hook实现现状-代码为准.md` |
+| 未提本仓库新增的写操作 hook | `mkdir`/`mkdirat`/`unlink`/`unlinkat`/`rename` 已 hook 并走 `redirect_path`（`native-hook.cpp:1390-1447`）；`rmdir` 仍缺 |
 | 未提 `MainLooperGuard` / `ProcessKillGuard` / `ProcSpoofing` / `PathRedirectRegistry` | 均已拆出为独立模块（见各镜像文档） |
 | L1「`VirtualContext`」 | 仍有效，但 `getDataDir()` 在 detached 模式下会返回合成路径（v147） |
 

@@ -111,7 +111,7 @@ libc
 | --- | --- | --- | --- |
 | **L1** | `java.io.UnixFileSystem.*0` | **`File` 的一切**（99% 的应用） | `RegisterNatives` |
 | **L2** | `libcore.io.Linux.*` | `android.system.Os`、部分 `File` 内部路径 | `RegisterNatives` |
-| **L3** | `sun.nio.fs.UnixNativeDispatcher.*` | NIO2（`Files.*`、`Path`） | `RegisterNatives` |
+| **L3** | `sun.nio.fs.UnixNativeDispatcher.*` | NIO2（`Files.*`、`Path`） | ❌ **计划，0 实现**（2026-11-25 核实：全仓无该类的 `RegisterNatives`） |
 | **L4** | libc（`open`/`mkdir`/...） | 应用自己的 .so、WebView 等 | native GOT patch |
 
 **要"换 app 也兼容"，就是把 L1–L3 都覆盖；L4 已经用 GOT patch 覆盖了。**

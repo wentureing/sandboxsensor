@@ -16,6 +16,7 @@
 | **`20261124-webview-file-delegate.md`**（v137 方案：包装 `WebViewClient` 补 MIME） | 「先问应用 client，返回 null 就补 MIME」可行 | **实测时序不可能**：Via 在 `onCreate`/fragment 里就 `loadUrl`，而视图树扫描最早到 `onResume`/定时器 → `installed=0 (+132ms)` → `installed=1 (+10s)`，**永远晚一步**（`delegated=0`）。已 **revert** | `docs/输出/记录/记录-W2-text-plain机制收敛.md` |
 | **`20261124-webview-mime-fix.md`**（方案 A 的注入点写法） | 「按类型扫 `WebView.declaredFields` 就能拿到 `WebViewClient`」 | 探针 **W30** 在 Android 15 上直接 `FAIL: WebView 里找不到 WebViewClient 类型字段`（client 存在 provider 内部） | 同上 |
 | **`P1-3-WebView代读.md`** | 前提是「**等 Gaia 机制研究清楚后再做**代读」 | Gaia 机制已查明（路径保真、无需 hook）→ 这个前提消失；而"代读"本身仍是对的方向（W11 验证有效），但注入点/时机问题未解 | `docs/架构/架构-注入时机审计.md`、`docs/架构/架构-Java层路径重定向-施工方向与方案.md` |
+| **`架构-hook路径覆盖矩阵与缺口.md` §一**（"mkdir 无 hook、容器只重定向文件操作"） | 「`mkdir`/`mkdirat` 无 hook；任何 `mkdir` 都落在宿主真实路径」 | **代码核实**（`6b5cfbe`）：`mkdir`/`mkdirat`/`unlink`/`unlinkat`/`rename` **全部已 hook 且走 `redirect_path`**（`native-hook.cpp:1390-1447`）。方案A 的真实失败机制是"建目录与打开文件走了不同层"（Java 落宿主 / native 落沙箱），不是 mkdir 未 hook | `docs/架构/架构-hook实现现状-代码为准.md` §二/§五；该文 §一 已就地更正 |
 
 ---
 

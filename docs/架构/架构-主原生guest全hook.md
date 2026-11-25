@@ -53,16 +53,22 @@
 
 ## 二、hook 手段的必要性重估
 
-### 2.1 现状：21 个符号，其中 5 个只打日志
+### 2.1 现状：**27 个符号**，其中 5 个只打日志
+
+> **2026-11-25 更正**：本文原写「21 个符号」。按 `baseline-v150 @ 6b5cfbe` 代码，
+> `native-hook.cpp:1679-1705` 实际是 **27 条**（新增 `mkdir`/`mkdirat`/`unlink`/`unlinkat`/`rename`）。
+> 完整清单与"哪些走 `redirect_path`"见 [`架构-hook实现现状-代码为准.md`](架构-hook实现现状-代码为准.md)。
 
 ```cpp
-/ native-hook.cpp:1593-1610 的 hook 表
+/ native-hook.cpp:1679-1705 的 hook 表（27 条）
 {"open", ...}, {"openat", ...}, {"access", ...}, {"stat", ...}, {"lstat", ...},
 {"readlink", ...}, {"fopen", ...}, {"__system_property_get", ...},
 {"open64", ...}, {"openat64", ...}, {"fopen64", ...},
 {"dlopen", ...}, {"android_dlopen_ext", ...}, {"dl_iterate_phdr", ...},
 {"ptrace", ...}, {"syscall", ...}, {"fork", ...}, {"opendir", ...},
-{"mmap", ...}, {"mprotect", ...}, {"connect", ...}, {"getaddrinfo", ...}
+{"mkdir", ...}, {"mkdirat", ...}, {"unlink", ...}, {"unlinkat", ...},
+{"rename", ...}, {"mmap", ...}, {"mprotect", ...}, {"connect", ...},
+{"getaddrinfo", ...}
 ```
 
 ### 2.2 按"必要性"重新分级（在"主原生/guest 全 hook"设计下）
@@ -87,6 +93,10 @@
 | **D. 待确认** | `mmap` / `mprotect` | ❇ | **用途待确认**（可能与 maps 伪造有关） | L5 |
 
 ### 2.3 分级后的清单（21 → 14）
+
+> ⚠️ **这一节是建议，从未执行（2026-11-25 核实代码）**：`syscall`/`fork`/`mmap`/`mprotect` 四条
+> **仍然在 hook 表里**（`native-hook.cpp:1694-1704`），`readlinkat` **仍未新增**。
+> 当时判"删掉不影响功能"的推理（§2.4）本身成立，但删除不是必须的——留着它们的成本是 GOT 痕迹与日志。
 
 **保留 14 个**：`open`、`openat`、`open64`、`openat64`、`stat`、`lstat`、`access`、`fopen`、`fopen64`、`opendir`、`readlink`、`readlinkat`（新增）、`__system_property_get`、以及条件性的 `dlopen`/`android_dlopen_ext`/`dl_iterate_phdr`/`ptrace`/`connect`/`getaddrinfo`
 
@@ -124,7 +134,7 @@
                               │ 拷贝（导入）
                               ▼
 ┌─ guest 进程 :p0–:p9（全 hook）────────────────────────────────┐
-│  L4 Java 文件 API：⚠️ 空壳（hookFileClass 只打日志）             │
+│  L4 Java 文件 API：✅ 16 个 RegisterNatives 方法（默认不安装）      │
 │  L5 native GOT（已加载库）：                                    │
 │       A 级：open/openat/stat/lstat/access/__system_property_get  │
 │             opendir（改造为 readdir 过滤）                       │
@@ -295,8 +305,11 @@ adb → CmdReceiver（主进程）→ 转发到 guest 进程（stub Service）
 | 18 | `connect` / `getaddrinfo` | D | L5 | ❓ 待定（网络，与路径无关） |
 | ~~19~~ | ~~`syscall`~~ | ❌ | — | **删** |
 | ~~20~~ | ~~`fork`~~ | ❌ | — | **删** |
-| ~~21~~ | ~~`mmap` / `mprotect`~~ | ❌ | — | **删** |
+| ~~21~~ | ~~`mmap` / `mprotect`~~ | ❌ | — | **删**（建议，未执行） |
 | **新** | **L6（运行期加载的库）** | — | **L6** | ❌ **需 R1**（patch `libnativeloader`） |
+| **本仓库新增** | `mkdir` / `mkdirat` / `unlink` / `unlinkat` / `rename` | A | L5 | ✅ 已做，均走 `redirect_path`（`:1390-1447`） |
+| **仍缺** | `rmdir` | — | — | ❌ 删目录不重定向 |
+| **仍缺** | `readlinkat` | B | — | ❌ **未新增**（现代代码更常用） |
 
 ---
 

@@ -73,7 +73,7 @@ native 侧 `synthetic_apk_path()` 用的是同一个值，**Java 层路径与 `/
 
 | API | 现状 | 说明 |
 | --- | --- | --- |
-| **`getExternalMediaDirs()`** | `<sandbox>/sdcard/Android/media/<pkg>` | 未加分支（`@Deprecated`，用得少） |
+| **`getExternalMediaDirs()`** | **已覆盖**（`54f3649` 补）：`pathFidelity` 时返回 `/storage/emulated/0/Android/media/<pkg>`；`contentPathsUseReal=false` 时返回真沙箱路径 | 2026-11-25 更正：旧文写"未加分支"，代码已补（`VirtualContext.kt:217`） |
 | `getExternalFilesDirs()` / `getExternalCacheDirs()` / `getObbDirs()` | 分别调用上面三个单数方法 | **自动跟随**，不需要单独改 |
 
 ### 3.3 不需要覆盖（**重要，否则会做错**）
@@ -119,6 +119,10 @@ fun isPathFidelityGuest(packageName: String) = packageName in PATH_FIDELITY_WHIT
 | 3 | 路径经 binder 传出时 | `FileProvider` / `Intent` 里的 `file://` 由**系统侧**解析成真实路径 → 可能拿到宿主数据 | 需单独评估，所有 pathFidelity 方案的共同风险 |
 
 **当前明确只支持单实例。**
+
+> **2026-11-25：多实例开发已暂停（用户决定）。** 上表缺陷 1 因此保持现状，
+> 不要在 B 阶段（`PathKinds` 数据表）顺手把 slot 塞进合成路径签名——那会牵动 24 条规则与
+> `VirtualContext`/`PackageManagerProxy` 的全部调用点。恢复多实例时，先改这里再改代码。
 
 ---
 

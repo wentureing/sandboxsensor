@@ -16,6 +16,7 @@
 
 | 文档 | 回答什么 |
 | --- | --- |
+| **`架构-hook实现现状-代码为准.md`** | **改 hook 前先读这个**：27 条 native 符号（哪些走 `redirect_path`）、16 个 Java `RegisterNatives` 方法（默认不安装）、库级过滤四级判据与三道开关、**默认配置下 Java 落宿主 / native 落沙箱的双层不一致**。多篇旧文档的"hook 清单/覆盖矩阵"已被它取代 |
 | **`架构-路径转换机制摸底.md`** | **三层机制**：`VirtualContext` 路径改写（Java）/ GOT-PLT patch（native）/ syscall 只打日志；**覆盖矩阵**（含实测：Java 层写 `/sdcard` 得 `EPERM`）；关键结论「普通 guest 没有 `/data/user/0/<guest>/` 规则」 |
 | **`架构-注入时机审计.md`** | **哪些注入必须发生在 guest 启动时**。判据：进程级运行时状态（native 表 / ServiceManager 缓存 / ART native entry / 静态字段 / proc spoof / seccomp）必须在目标进程注入。含 8 项已正确、4 项有问题、3 项零调用的清单 |
 | **`架构-Java层路径重定向-施工方向与方案.md`** | 补 Java 层重定向的施工方案：`RegisterNatives` 替换 `libcore.io.Linux` 的 native 方法（实测签名：`open`/`stat`/`access`/…）；不 patch libart；风险与落地顺序 |
