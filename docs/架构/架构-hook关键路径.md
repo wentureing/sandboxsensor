@@ -27,7 +27,52 @@
 
 ## 二、关键路径详解（回归时按这个顺序查）
 
+### 总览：三条上游编号序列拼成完整的 guest 启动链
+
+> **这三条不是我们归纳的，是上游代码里用 `// === STEP n ===` / `// Step n:` / `// Phase n:` 写出来的。**
+> 历次拆分都完整保留了它们的注释与顺序（已核实：`ActivityThreadHook` L407–556、
+> `VirtualApplicationManager` L566–631、`NativeHookBridge` L268/271）。
+
+```
+① native hook 安装（NativeHookBridge.initNativeHooks：Phase 1 → Phase 2）
+   ↓  决定"路径重定向是否真的生效"
+② guest 进程 bind → Application 启动（VirtualApplicationManager.createApplication：Step 1 → 6）
+   ↓  决定"Application/Provider 是否按 AOSP 顺序起来"
+③ Activity 启动（ActivityThreadHook.handleLaunchActivityItem：STEP 0 → 5）
+   ↓  决定"Activity 能否用 guest 的类与资源"
+④ 之后的运行时（mH 消息、Instrumentation 回调、路径解析三层）
+```
+
+**为什么按这个顺序查**：前一步失败会让后一步"看起来也失败"，但从后往前查会误判。
+例如 Phase 2 失败时 Activity 仍能起来（只是文件读不到），容易被当成"路径规则没注册"。
+
 ### 路径 A：native 层（1 + 2 + 10 + 11）
+
+**上游是怎么写的**（`NativeHookBridge.initNativeHooks`，旧代码 L889–905 的 `Phase 1/2` 注释）：
+
+```kotlin
+// Phase 1: Java-level IO hooks
+val javaHooksInstalled = installJavaIoHooks()
+
+// Phase 2: Try to load native library for PLT hooks (GOT patching)
+nativeHooksAvailable = tryLoadNativeLibrary()
+if (nativeHooksAvailable) {
+    nativeInit()                                  // GOT patch
+    nativeSetHostDataPrefix(ctx.dataDir)          // ← 必须紧接着设
+    nativeSetVirtualDataRoot(ctx.filesDir/virtual) // ← 否则 native 不知道重定向到哪
+}
+```
+
+| Phase | 内容 | 失败后果 |
+| --- | --- | --- |
+| **1** | Java 层 IO hook（`RegisterNatives`） | 只影响纯 Java IO（默认关闭） |
+| **2** | native GOT patch（`nativeInit`） | **路径重定向整体失效** |
+| 2 后续 | `nativeSetHostDataPrefix` + `nativeSetVirtualDataRoot` | 规则虽在，但**目标前缀为空** → 翻译成错误路径 |
+
+**回归判据**：
+- 有 `initNativeHooks ... installing hooks` 事件（**不是** `skip: container main process`）；
+- `nativeGetRedirectCount()` > 0；
+- 若 Phase 2 失败，`v142 registered rules` 仍会打印（Kotlin 侧成功），但**实际不生效** —— 这是最容易误判的点。
 
 ```
 NextVmApplication.onCreate
@@ -90,6 +135,31 @@ STEP 2.5（Application.onCreate） ──必须先于──> Activity.onCreate�
 1. 按顺序出现 `cl replace enter` → `bindApplication` → `LegacyMessageHandlers`/`instr`；
 2. STEP 2.5 若失败，现象是 **Activity 起来了但 Application 没起来**（很多应用会因此崩或白屏）；
 3. STEP 0 若失败，现象是 **`ActivityClientRecord` 为 null**，后续 NPE。
+
+### 路径 C2：Application 启动 —— **Step 1 → 6 序列**
+
+> 同样来自上游代码的编号注释：`VirtualApplicationManager.createApplication`（旧代码 L566–631）。
+> 对应 AOSP 的 `LoadedApk.makeApplication`，**Step 5 早于 Step 6 是 AOSP 语义**。
+
+| Step | 做什么 | 关键调用 | 依赖 |
+| --- | --- | --- | --- |
+| **1** | 在 virtual context 上准备 `ApplicationInfo` | `buildApplicationInfo(...)` | — |
+| **2** | 创建 guest 的 Application 实例 | `createApplication(...)` | Step 1 |
+| **3** | 建 `ApplicationRecord` | `ApplicationRecord(...)` | Step 2 |
+| **3.5** | 把 guest Application 设到 `VirtualContext` | `setGuestApplication(...)` | 让 `getApplicationContext()` 返回 guest 对象 |
+| **4** | `attachBaseContext` | `swapInStockInstrumentation` + attach | Step 3.5 |
+| **4.5** | 把 `LoadedApk.mApplication` 改成 guest Application | `patchLoadedApkApplication(...)` | 否则 framework 里拿到的还是 stub Application |
+| **5** | **在 `Application.onCreate` 之前装 ContentProviders** | `initContentProviders(...)` | **AOSP 语义：Provider 先于 App.onCreate** |
+| **6** | 调 `Application.onCreate()` | `callApplicationOnCreate(...)` | 最后一步 |
+
+**为什么 Step 5 必须在 Step 6 前**：
+AOSP 的 `LoadedApk.makeApplication` 里，`ContentProvider.onCreate` 先于 `Application.onCreate`。
+很多应用（尤其用 `androidx.startup` / Firebase 的）依赖这个顺序 —— 顺序反了会
+**Provider 里拿不到初始化好的 Application 单例**，表现为偶发 NPE 或初始化丢失。
+
+**回归判据**：
+- `bindApplication` 事件在 Activity 启动事件（`txn`）之前；
+- 有 Provider 的 guest：`initContentProviders` 应在 `callApplicationOnCreate` 之前完成。
 
 ### 路径 C'：路径解析三层（按优先级）
 
