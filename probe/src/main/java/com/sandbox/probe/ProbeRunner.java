@@ -34,6 +34,8 @@ public final class ProbeRunner {
     private final Context ctx;
     private final JSONArray entries = new JSONArray();
     private final String pkg;
+    /** 本轮只跑重点：默认 round（路径 J* / 写入 F* / 诊断 D*），其余记 skipped。 */
+    private final ProbeSuite suite = ProbeSuite.current();
 
     public ProbeRunner(Context ctx) {
         this.ctx = ctx;
@@ -61,15 +63,75 @@ public final class ProbeRunner {
         probeMount();      // P22-P23  mountinfo
         probeUiEntries();  // P24-P27  uiprobe（PopupWindow / 子窗口，来自 UiProbe）
         probeNative();
+        probeDiag();
 
         JSONObject root = new JSONObject();
         root.put("schema", 1);
+        root.put("suite", suite.name());
         root.put("mode", detectMode());
         root.put("packageName", pkg);
         root.put("timeline", Report.timeline());
         root.put("provider", Report.providerEntries());
         root.put("entries", entries);
         return root;
+    }
+
+    // ---------------------------------------------------------------- diag (D)
+
+    /**
+     * D01-D05：诊断通道是否按预期产出。
+     *
+     * 命名规则与 core:common 的 DiagFiles 保持一致（探针不依赖 core:common，
+     * 规范文本在 DiagFiles 的 KDoc 里作为唯一来源）。
+     */
+    private void probeDiag() {
+        final File files = ctx.getFilesDir();
+        final int pid = android.os.Process.myPid();
+
+        put("D01", "diag", "breadcrumb.exists", () -> {
+            File f = new File(files, "breadcrumb-" + pid + ".log");
+            return "exists=" + f.exists() + " size=" + (f.exists() ? f.length() : 0L);
+        });
+        put("D02", "diag", "checks.lines", () -> {
+            File f = new File(files, "checks.log");
+            if (!f.exists()) return "exists=false";
+            String s = readText(f, 64 * 1024);
+            int lines = s.isEmpty() ? 0 : s.split("\n", -1).length;
+            return "exists=true lines=" + lines;
+        });
+        put("D03", "diag", "stackdump.exists", () -> {
+            File f = new File(files, "stackdump-" + pid + ".log");
+            return "exists=" + f.exists() + " size=" + (f.exists() ? f.length() : 0L);
+        });
+        put("D04", "diag", "log.total", () -> {
+            File[] fs = files.listFiles();
+            int n = 0;
+            long bytes = 0L;
+            if (fs != null) {
+                for (File f : fs) {
+                    String nm = f.getName();
+                    if (f.isFile() && (nm.endsWith(".log") || nm.endsWith(".dex"))) {
+                        n++;
+                        bytes += f.length();
+                    }
+                }
+            }
+            return "files=" + n + " bytes=" + bytes;
+        });
+        put("D05", "diag", "checks.tail", () -> {
+            File f = new File(files, "checks.log");
+            if (!f.exists()) return "exists=false";
+            String s = readText(f, 64 * 1024);
+            String[] all = s.split("\n");
+            int from = Math.max(0, all.length - 3);
+            StringBuilder sb = new StringBuilder();
+            for (int i = from; i < all.length; i++) {
+                if (sb.length() > 0) sb.append(" | ");
+                String line = all[i];
+                sb.append(line.length() > 120 ? line.substring(0, 120) : line);
+            }
+            return sb.toString();
+        });
     }
 
     // ---------------------------------------------------------------- context
@@ -881,7 +943,25 @@ public final class ProbeRunner {
     // ------------------------------------------------------------------ utils
 
     private void put(String id, String group, String name, Report.Probe probe) {
+        // 套件过滤：本轮只跑重点（默认 round = 路径/写入/诊断）；其余记 skipped，代码保留
+        if (!suite.enabled(id)) {
+            putSkipped(id, group, name);
+            return;
+        }
         Report.put(entries, id, group, name, probe);
+    }
+
+    private void putSkipped(String id, String group, String name) {
+        try {
+            JSONObject o = new JSONObject();
+            o.put("id", id);
+            o.put("group", group);
+            o.put("name", name);
+            o.put("status", "skipped");
+            entries.put(o);
+        } catch (Throwable ignored) {
+            // 记录 skipped 失败不影响其它项
+        }
     }
 
     private static String readText(File f, int max) throws Exception {

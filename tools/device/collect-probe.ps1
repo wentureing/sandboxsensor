@@ -125,6 +125,8 @@ Write-Host ("  mode      = {0}" -f $json.mode)
 Write-Host ("  package   = {0}" -f $json.packageName)
 Write-Host ("  timeline  : {0}" -f (($json.timeline | ForEach-Object { $_.phase }) -join ' -> '))
 $okCount = ($json.entries | Where-Object { $_.status -eq 'ok' }).Count
-$failCount = ($json.entries | Where-Object { $_.status -ne 'ok' }).Count
-Write-Host ("  entries   = {0} ok / {1} fail" -f $okCount, $failCount)
+$failCount = ($json.entries | Where-Object { $_.status -eq 'fail' }).Count
+# 探针套件（ProbeSuite）会把"本轮不重点"的项记 skipped —— 不能算失败
+$skipCount = ($json.entries | Where-Object { $_.status -eq 'skipped' }).Count
+Write-Host ("  entries   = {0} ok / {1} fail / {2} skipped  (suite={3})" -f $okCount, $failCount, $skipCount, $json.suite)
 Write-Host ("  报告      = {0}" -f (Resolve-Path $reportPath))

@@ -63,6 +63,9 @@ for k in ORDER:
     if not e:
         print("  %-5s (缺失)" % k)
         continue
+    if e.get("status") == "skipped":
+        print("  %-5s (本轮暂停：不在选中的 suite 内)" % k)
+        continue
     print("  %-5s %s" % (k, e.get("name")))
     print("        [%s] %s" % (e.get("status"), e.get("value")))
 

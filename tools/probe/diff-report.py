@@ -23,6 +23,8 @@ def load(path: Path):
 def fmt(e):
     if e is None:
         return "—"
+    if e.get("status") == "skipped":
+        return "—（暂停）"
     if e.get("status") == "ok":
         return str(e.get("value"))
     return f"FAIL({e.get('error')})"
