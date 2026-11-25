@@ -57,19 +57,49 @@ guest 进程 bindApplication
 **回归判据**：`v142 registered rules=N` 的 N 与 `getNativeRedirectCount()` **一致**。
 （当前两者分两行打印，需人工对比 —— 见「待改进」）
 
-### 路径 C：Activity 启动（6 + 7 + 8）
+### 路径 C：Activity 启动 —— **STEP 0 → 5 注入序列**（本项目的核心关键路径）
+
+> **这是上游代码里用 `// === STEP n ===` 编号显式写出的顺序**，不是推测。
+> 代码位置：`ActivityThreadHook.handleLaunchActivityItem`（旧代码 L482–683，现 L407–556）。
+> **顺序不能改**：后面每一步都依赖前一步的产物。
+
+| STEP | 做什么 | 为什么必须在这个位置 | 观测点 |
+| --- | --- | --- | --- |
+| **前置** | 等 engine 到 `READY`（最多 10s） | 竞态：`ActivityThread` 可能比 engine 初始化更早 | — |
+| **0** | 预注册 activity token 到 `mActivities` | 后面 `performLaunchActivity` 需要 `ActivityClientRecord` 已存在 | — |
+| **1** | 交换 `ActivityInfo.name`（stub → guest 类名） | **必须先于 STEP 2**：否则 classloader 拿到的还是 stub 类名 | — |
+| **1.5** | 开始 breadcrumb 见证 | 在 swap **完成前**就开始记录，才能捕获中途失败 | `BootCrumb` |
+| **2** | 替换 `LoadedApk.mClassLoader` | 让 guest 的类能被加载（STEP 1 换了名字，这里换来源） | `cl replace enter` |
+| **2.1** | 探测资源状态（v79） | 纯观测：确认资源是否真的从 guest APK 加载 | — |
+| **2.2** | APK watchdog（v80/v81） | 纯观测：证实 APK 路径可用 | — |
+| **2.5** | **启动 guest Application 生命周期（代码注释标 CRITICAL）** | **必须早于 Activity 创建**：`Application.onCreate` 先于 `Activity.onCreate` | `bindApplication` |
+| **3** | 登记挂起的资源注入 | Activity `attach` 后才有 `Resources` 可换 | — |
+| **4** | 登记挂起的 `VirtualContext` 包装 | `Activity.attach` 时替换 base context | — |
+| **5** | 登记 Instrumentation hook（post-create 注入） | 之后的 `onActivityPreCreate` 才能注入 | `instr` |
+| 收尾 | `return false` | 让**已修改**的事务继续走原生流程 | — |
+
+**依赖链（改顺序会立刻坏）**：
 
 ```
-ActivityThread.handleMessage(EXECUTE_TRANSACTION)
-  → ActivityThreadHook.handleMessage           // DebugTrace: txn msg.what=159
-    → handleExecuteTransaction                  // DebugTrace: EXECUTE_TRANSACTION enter
-      → handleLaunchActivityItem                // DebugTrace: LaunchActivityItem enter
-          ├─ preRegisterActivityToken（主题/Token 预置）
-          ├─ replaceClassLoader(guestPkg, ...)  // DebugTrace: cl replace enter
-          └─ 注入 Instrumentation（instr）
+STEP 1（换类名） ──必须先于──> STEP 2（换 classloader）
+STEP 2（换 classloader） ──必须先于──> STEP 2.5（启动 Application）
+STEP 2.5（Application.onCreate） ──必须先于──> Activity.onCreate（由 STEP 3/4/5 的挂起回调完成）
 ```
 
-**回归判据**：这三行**按顺序**出现；`cl replace enter` 的 pkg 是 guest 包名。
+**回归判据**：
+1. 按顺序出现 `cl replace enter` → `bindApplication` → `LegacyMessageHandlers`/`instr`；
+2. STEP 2.5 若失败，现象是 **Activity 起来了但 Application 没起来**（很多应用会因此崩或白屏）；
+3. STEP 0 若失败，现象是 **`ActivityClientRecord` 为 null**，后续 NPE。
+
+### 路径 C'：路径解析三层（按优先级）
+
+| 层 | 手段 | 覆盖 | 观测 |
+| --- | --- | --- | --- |
+| **L-Java** | `VirtualContext` 重写（26 个方法） | 通过 Context 拿路径的代码（~90%） | `ctx` 事件 |
+| **L-native GOT** | `redirect_path()` | 被 patch 的库（大多数 native 代码） | `v142 rules=N` |
+| **L-syscall** | 仅日志（`armSeccompDiag`） | 直接 `svc` 的代码（**不拦截**） | 无 |
+
+**回归判据**：Java 侧与 native 侧**必须一致**（同一路径两边算出同一结果）。
 
 ### 路径 D：legacy 消息（Android 9 以下 / Service / Receiver）
 
