@@ -1,0 +1,170 @@
+name: golden-from-baseline
+
+# 从「原项目」（未重构的历史版本）生成 golden。
+#
+# 为什么需要：
+#   用户要求 —— golden 只能在**原项目基础上增加测试输出**得到，
+#   不能用重构后的代码自我证明（那样重构时逻辑被改了 golden 也会跟着错）。
+#
+# 做法（严格约束：只加测试，不改一行 src/main）：
+#   1) 把容器源码 checkout 到 base_ref（重构前的 commit）
+#   2) 从 main 分支只取测试目录覆盖过来（test 源集，不进 APK）
+#   3) UPDATE_GOLDEN=1 跑被测测试 -> 生成 approved.txt
+#   4) 上传 approved.txt 作为 artifact，由人 review 后提交
+#
+# 触发：手动 dispatch，一次一个。
+#   node tools/release/gh-api.mjs --dispatch golden-from-baseline.yml main
+
+on:
+  workflow_dispatch:
+    inputs:
+      base_ref:
+        description: '容器仓库的「原始」commit/tag（golden 的真相来源）'
+        default: 'ce7e758^'
+      modules:
+        description: '被测模块（空格分隔）'
+        default: ':core:sandbox'
+      tests:
+        description: '测试类过滤（Gradle --tests 语法）'
+        default: 'com.nextvm.core.sandbox.*Golden*'
+      golden_paths:
+        description: '要收集的 golden 目录（相对仓库根）'
+        default: 'core/sandbox/src/test/resources/golden'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: golden-from-baseline-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  ANDROID_SDK_ROOT: ${{ github.workspace }}/.android-sdk
+  ANDROID_HOME: ${{ github.workspace }}/.android-sdk
+  SDK_PLATFORM: 'android-35'
+  BUILD_TOOLS: '35.0.0'
+  NDK_VERSION: '27.1.12297006'
+  CMAKE_VERSION: '3.22.1'
+  GRADLE_VERSION: '8.9'
+  ROBOLECTRIC_VERSION: '4.14'
+  CACHE_EPOCH: 'v2'
+
+jobs:
+  golden:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout container at BASE ref (original project)
+        uses: actions/checkout@v4
+        with:
+          repository: wentureing/ShitJumpingVM
+          ref: ${{ inputs.base_ref || 'ce7e758^' }}
+          path: container
+          fetch-depth: 50          # 需要后续 fetch main 来取测试代码
+          persist-credentials: false
+
+      - name: Show base revision
+        working-directory: container
+        run: |
+          echo "base_ref=${{ inputs.base_ref || 'ce7e758^' }}"
+          git log --oneline -1
+          echo "--- 确认 src/main 未被改动 ---"
+          git status --short | grep -E 'src/main' && echo "::error::src/main 被改动，违反约束" && exit 1 || echo "OK: 只有测试目录会变"
+
+      - name: Overlay test sources from main (ONLY test dirs)
+        working-directory: container
+        run: |
+          set -euo pipefail
+          git remote add origin https://github.com/wentureing/ShitJumpingVM.git || true
+          git fetch --depth=1 origin main
+          # 只覆盖 test 源集与 test 资源；绝不碰 src/main
+          for m in ${{ inputs.modules || ':core:sandbox' }}; do
+            mod_path="$(echo "$m" | sed 's/^://; s/:/\//')"
+            if git ls-tree -r --name-only origin/main -- "${mod_path}/src/test" | head -n1 | grep -q .; then
+              echo "overlay ${mod_path}/src/test"
+              git checkout origin/main -- "${mod_path}/src/test"
+            else
+              echo "skip ${mod_path}/src/test (main 上没有)"
+            fi
+          done
+          echo "--- 覆盖后改动清单（应只有 src/test/**）---"
+          git status --short
+
+      - name: Verify no production code touched
+        working-directory: container
+        run: |
+          set -euo pipefail
+          if git status --short | grep -E 'src/main' ; then
+            echo "::error::检测到 src/main 被修改，拒绝生成 golden（golden 必须来自原项目逻辑）"
+            exit 1
+          fi
+          echo "OK：src/main 未改动，golden 来自原项目逻辑"
+
+      - name: Cache Android SDK
+        uses: actions/cache@v4
+        with:
+          path: .android-sdk
+          key: sdk-${{ env.SDK_PLATFORM }}-bt${{ env.BUILD_TOOLS }}-ndk${{ env.NDK_VERSION }}-cmake${{ env.CMAKE_VERSION }}-${{ env.CACHE_EPOCH }}
+          restore-keys: |
+            sdk-${{ env.SDK_PLATFORM }}-bt${{ env.BUILD_TOOLS }}-ndk${{ env.NDK_VERSION }}-cmake${{ env.CMAKE_VERSION }}-
+
+      - name: Install Android SDK components
+        run: |
+          set -euo pipefail
+          SDKMAN="$(ls -1 /usr/local/lib/android/sdk/cmdline-tools/*/bin/sdkmanager 2>/dev/null | head -n1 || true)"
+          [ -x "${SDKMAN:-}" ] || SDKMAN="$(command -v sdkmanager)"
+          mkdir -p "$ANDROID_SDK_ROOT"
+          yes | "$SDKMAN" --sdk_root="$ANDROID_SDK_ROOT" --licenses > /dev/null 2>&1 || true
+          "$SDKMAN" --sdk_root="$ANDROID_SDK_ROOT" --install \
+            "platforms;${SDK_PLATFORM}" "build-tools;${BUILD_TOOLS}" \
+            "platform-tools" "ndk;${NDK_VERSION}" "cmake;${CMAKE_VERSION}"
+
+      - name: Setup JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Cache Gradle home
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper/dists
+          key: gradle-home-${{ env.GRADLE_VERSION }}-${{ env.CACHE_EPOCH }}
+          restore-keys: |
+            gradle-home-${{ env.GRADLE_VERSION }}-
+
+      - name: Cache Robolectric runtime jars
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository/org/robolectric
+          key: robolectric-${{ env.ROBOLECTRIC_VERSION }}-${{ env.CACHE_EPOCH }}
+          restore-keys: |
+            robolectric-${{ env.ROBOLECTRIC_VERSION }}-
+
+      - name: Generate golden from ORIGINAL code
+        working-directory: container
+        env:
+          UPDATE_GOLDEN: '1'      # 只有这个 workflow 允许重录
+        run: |
+          set -euo pipefail
+          chmod +x gradlew
+          MODULES="${{ inputs.modules || ':core:sandbox' }}"
+          FILTER="${{ inputs.tests || 'com.nextvm.core.sandbox.*Golden*' }}"
+          TASKS=""
+          for m in $MODULES; do TASKS="$TASKS ${m}:testDebugUnitTest"; done
+          echo "UPDATE_GOLDEN=1  $TASKS --tests '$FILTER'"
+          ./gradlew --no-daemon --stacktrace $TASKS --tests "$FILTER" \
+            -DfailOnNoMatchingTests=false || true
+          echo "--- 生成的 golden ---"
+          git status --short | grep golden || echo "(无变化)"
+
+      - name: Upload generated golden
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: golden-from-${{ inputs.base_ref || 'ce7e758^' }}
+          path: container/${{ inputs.golden_paths || 'core/sandbox/src/test/resources/golden' }}/
+          if-no-files-found: warn
