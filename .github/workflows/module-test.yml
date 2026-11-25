@@ -44,6 +44,9 @@ env:
   CMAKE_VERSION: '3.22.1'
   # 与 container-build / probe-build 保持一致，便于复用同一份 Gradle 缓存
   GRADLE_VERSION: '8.9'
+  # Robolectric 运行时按 SDK 下载 android-all-instrumented jar（约 100MB/个），
+  # 不经过 Gradle 依赖解析，缓存在 ~/.m2/repository —— 必须单独缓存，否则每次都下。
+  ROBOLECTRIC_VERSION: '4.14'
   CACHE_EPOCH: 'v2'
 
 jobs:
@@ -120,6 +123,18 @@ jobs:
             gradle-home-${{ env.GRADLE_VERSION }}-libs-${{ env.CACHE_EPOCH }}-
             gradle-home-${{ env.GRADLE_VERSION }}-${{ env.CACHE_EPOCH }}
             gradle-home-${{ env.GRADLE_VERSION }}-
+
+      # Robolectric 的 android-all-instrumented jar 不走 Gradle 依赖解析，
+      # 由 Robolectric 自己的 Maven 客户端下到 ~/.m2/repository。
+      # 不缓存的话，每个用到 Robolectric 的模块首次跑测试都要重下 ~100MB/SDK。
+      - name: Cache Robolectric runtime jars
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.m2/repository/org/robolectric
+          key: robolectric-${{ env.ROBOLECTRIC_VERSION }}-${{ env.CACHE_EPOCH }}
+          restore-keys: |
+            robolectric-${{ env.ROBOLECTRIC_VERSION }}-
 
       - name: Run module unit tests
         working-directory: container
