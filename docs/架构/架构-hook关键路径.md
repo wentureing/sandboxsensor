@@ -112,16 +112,6 @@ handleMessage
 
 **回归判据**：跑一个带 Service/Receiver 的 guest，`legacy` 至少出现 1 次。
 
-### 路径 E：路径解析（三层，按优先级）
-
-| 层 | 手段 | 覆盖 | 观测 |
-| --- | --- | --- | --- |
-| **L-Java** | `VirtualContext` 重写（26 个方法） | 通过 Context 拿路径的代码（~90%） | `ctx` 事件 |
-| **L-native GOT** | `redirect_path()` | 被 patch 的库（大多数 native 代码） | `v142 rules=N` |
-| **L-syscall** | 仅日志（`armSeccompDiag`） | 直接 `svc` 的代码（**不拦截**） | 无 |
-
-**回归判据**：Java 侧与 native 侧**必须一致**（同一路径两边算出同一结果）。
-
 ---
 
 ## 三、已知失效点（回归时最容易"看起来正常其实没生效"）
