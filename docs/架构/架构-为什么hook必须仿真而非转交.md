@@ -187,8 +187,8 @@ Libcore.os = proxy;                             // 反射替换静态字段
 
 | 文件 | 行数 | 用途 |
 | --- | --- | --- |
-| `tools/tmp/libcore_io_Linux.cpp` | 2916 | `Linux.*` 的真实实现（`Linux_open` 等） |
-| `tools/tmp/UnixFileSystem_md.c` | 572 | `UnixFileSystem.*0` 的真实实现（`list0`/`createDirectory0`/`getBooleanAttributes0`/`canonicalize0`） |
+| `tools/ref/libcore_io_Linux.cpp` | 2916 | `Linux.*` 的真实实现（`Linux_open` 等） |
+| `tools/ref/UnixFileSystem_md.c` | 572 | `UnixFileSystem.*0` 的真实实现（`list0`/`createDirectory0`/`getBooleanAttributes0`/`canonicalize0`） |
 
 来源：`git clone --depth 1 https://github.com/LineageOS/android_libcore.git`（AOSP libcore 镜像，分支 `lineage-21.0`）
 —— **GitHub 上 `aosp-mirror/platform_libcore` 不存在，`LineageOS/android_libcore` 是可用镜像。**

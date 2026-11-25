@@ -2,8 +2,8 @@
 
 - 日期：2026-11-25
 - 方法：三方对照
-  1. `tools/tmp/UnixFileSystem_md.c`（AOSP 旧版源码，**只能作行为参考**）
-  2. `tools/tmp/libcore_io_Linux.cpp`（AOSP `Linux.*` 实现）
+  1. `tools/ref/UnixFileSystem_md.c`（AOSP 旧版源码，**只能作行为参考**）
+  2. `tools/ref/libcore_io_Linux.cpp`（AOSP `Linux.*` 实现）
   3. **设备 dex**（`dexdump` 读 `/apex/.../core-oj.jar`、`core-libart.jar`）—— **方法是否 native 以它为准**
   4. 我们的注册表（`native-hook.cpp` 里的 `JNINativeMethod`）
 

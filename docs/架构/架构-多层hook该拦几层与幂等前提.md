@@ -62,7 +62,7 @@ libc opendir()/readdir()                   ← **libc**  ← GOT patch 点
 
 **关键前提：翻译是否幂等**。
 
-已实测验证（`tools/tmp/verify-idempotent-translate.py`）：
+已实测验证（`tools/analyze/verify-idempotent-translate.py`）：
 
 ```
 === 沙箱路径是否会被二次命中（幂等性检查）===

@@ -2,8 +2,8 @@
 
 - 日期：2026-11-25
 - 依据（真实源码，非推导）：
-  - `tools/tmp/libcore_io_Linux.cpp`（2916 行，`LineageOS/android_libcore` @ `lineage-21.0`）
-  - `tools/tmp/UnixFileSystem_md.c`（572 行，同仓）
+  - `tools/ref/libcore_io_Linux.cpp`（2916 行，`LineageOS/android_libcore` @ `lineage-21.0`）
+  - `tools/ref/UnixFileSystem_md.c`（572 行，同仓）
 - 状态：**只列出，不修改**（用户指定：CI 期间先对照）
 
 > **自我更正（2026-11-25）**：本清单初稿曾把 `Linux.mkdir`/`unlink`/`rename` 的空参分支

@@ -102,8 +102,8 @@
 
 | 文件 | 行数 | 用途 |
 | --- | --- | --- |
-| `tools/tmp/libcore_io_Linux.cpp` | 2916 | `Linux.*` 的真实实现 |
-| `tools/tmp/UnixFileSystem_md.c` | 572 | `UnixFileSystem.*0` 的真实实现 |
+| `tools/ref/libcore_io_Linux.cpp` | 2916 | `Linux.*` 的真实实现 |
+| `tools/ref/UnixFileSystem_md.c` | 572 | `UnixFileSystem.*0` 的真实实现 |
 
 **建议**：确认稳定后移到 `tools/ref/`（不要把 `tools/tmp` 当长期目录）。
 

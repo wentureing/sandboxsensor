@@ -9,8 +9,8 @@
 import re
 import io
 
-UFS = "tools/tmp/UnixFileSystem_md.c"
-LINUX = "tools/tmp/libcore_io_Linux.cpp"
+UFS = "tools/ref/UnixFileSystem_md.c"
+LINUX = "tools/ref/libcore_io_Linux.cpp"
 MINE = "_ref/ShitJumpingVM/core/hook/src/main/cpp/native-hook.cpp"
 
 

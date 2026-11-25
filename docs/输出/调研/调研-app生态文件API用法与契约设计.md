@@ -140,7 +140,7 @@ app 认为"文件不存在" → **即使文件真实存在于沙箱，列表/流
 
 ### 5.2 脚本
 
-`tools/tmp/app-api-survey.py`：pull → 提 dex → 统计字符串引用 + `invoke` 数 → 横向表。
+`tools/analyze/app-api-survey.py`：pull → 提 dex → 统计字符串引用 + `invoke` 数 → 横向表。
 **以后换 app 或用例变化时，重跑一次就能知道该覆盖哪层。**
 
 ### 5.3 一句话
