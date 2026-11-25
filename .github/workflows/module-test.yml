@@ -136,6 +136,20 @@ jobs:
           restore-keys: |
             robolectric-${{ env.ROBOLECTRIC_VERSION }}-
 
+      - name: Diagnose test sources and compiled classes
+        if: always()
+        working-directory: container
+        run: |
+          echo '===== test source files ====='
+          find . -path '*/src/test/*' -name '*.kt' -print 2>/dev/null | head -30
+          echo '===== core/hook build dir ====='
+          ls -la core/hook/build 2>/dev/null || echo '(no build dir)'
+          echo '===== debugUnitTest class files ====='
+          find core/hook/build -name '*.class' 2>/dev/null | grep -i unit | head -30
+          echo '===== classes dumps ====='
+          find core/hook/build -name '*NativeHookBridgePathTest*' 2>/dev/null | head -10
+          echo '===== settings core:hook ====='
+          grep -n 'core:hook' settings.gradle.kts || true
       - name: Run module unit tests
         working-directory: container
         run: |
