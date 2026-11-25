@@ -531,3 +531,20 @@ ktlint / semgrep 同理 —— 它们**都不做完整类型解析，查不出�
   `ls -l` 只反映 DAC，真实访问还经过 SELinux 与 FUSE/appops）
 - **测试设备**：`10AFA8169Z0039G`（vivo V2463A / Android 15 / arm64-v8a / PAGESIZE=4096）
 - **设备时钟**比电脑快约 2 分钟，日志按设备时间切片
+
+## Kotlin DSL（build.gradle.kts）里禁用 `java.util` / `java.io` 直接写法
+
+> **`java` 在 Gradle Kotlin DSL 里会被优先解析成 `JavaPluginExtension`**（即 `java { }` 块），
+> 所以 `java.util.Properties()` / `java.io.File(...)` 会报 `Unresolved reference: util / io`。
+
+必须在脚本**顶部** import 并起别名：
+
+```kotlin
+import java.io.File as JavaFile
+import java.util.Properties as JavaProperties
+```
+
+然后 `JavaProperties()` / `JavaFile(path)`。
+
+**已踩三次**：CI 编号 22（probe 模块）、以及 `upstream-baseline` 分支的签名配置两次。
+排查时先看 `build.gradle.kts` 顶部有没有注释 —— fork 的 app 模块里已经写了这个坑。
