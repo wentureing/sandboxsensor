@@ -1,0 +1,31 @@
+# VirtualContext 路径矩阵 golden 基线
+#
+# 生成方式：Robolectric 实际运行 VirtualContextPathGoldenTest
+#   CI run 45526732299（success），容器 commit 906f025
+# 含义：guest=mark.via / instanceId=1 时，VirtualContext 16 个路径方法的返回值
+#   <ROOT>  = SandboxManager.virtualRoot（真机上为 <host filesDir>/virtual）
+#   <GUEST> = mark.via
+#
+# 用途：
+#   1) 真机测试时的对照基准（探针读到的路径应与此一致）
+#   2) 后续改动 core:sandbox 时的回归基线
+#
+# 注意：dataDir 返回 <ROOT>/data/1（沙箱内），**不是** /data/user/0/mark.via。
+#       这是设计使然：假 dataDir 只对 com.sandbox.probe 生效（detached 白名单）。
+packageName => mark.via
+opPackageName => com.nextvm.app
+filesDir => <ROOT>/data/1/files
+cacheDir => <ROOT>/data/1/cache
+codeCacheDir => <ROOT>/data/1/code_cache
+dataDir => <ROOT>/data/1
+noBackupFilesDir => <ROOT>/data/1/no_backup
+databasePath(n.db) => <ROOT>/data/1/databases/n.db
+dir(x,0) => <ROOT>/data/1/app_x
+externalFilesDir(null) => <ROOT>/data/1/sdcard/Android/data/<GUEST>/files
+externalFilesDirs(null) => <ROOT>/data/1/sdcard/Android/data/<GUEST>/files
+externalCacheDir => <ROOT>/data/1/sdcard/Android/data/<GUEST>/cache
+externalCacheDirs => <ROOT>/data/1/sdcard/Android/data/<GUEST>/cache
+externalMediaDirs => <ROOT>/data/1/sdcard/Android/media/<GUEST>
+obbDir => <ROOT>/data/1/sdcard/Android/obb/<GUEST>
+obbDirs => <ROOT>/data/1/sdcard/Android/obb/<GUEST>
+
