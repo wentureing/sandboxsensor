@@ -540,6 +540,8 @@ adb shell run-as com.nextvm.app ls files/            # checks.log / debug-trace.
 | `6eef94d` | **P1**：`LaunchPlanner`（纯决策）+ `StubRegistry.candidatesFor/markInUse` + 引擎接线 + `LaunchPlannerTest` P1–P9；同时修复 `CmdReceiver` 的 `VmResult` import 路径（编译错误） |
 | `5c3ad00` | 修复 `dropLease` 语义（无租约时不算"丢"；P3 断言） |
 | `1289a97` | **Step 3**：① guest 进程名适配（`getRunningAppProcesses` 本进程条目 → guest 包名）；② 长按改为"启动新实例"（`forceNewSession`，新 stub→新 task，同进程）；③ STALE 自动回收（`reconcileSlots`）；④ 按 task 清理（`cleanupTask`/`cleanupSlot`，**不杀进程**）+ 列表接线（task 展开、逐个 Close）；⑤ `SlotStatus.tasks` / `TaskRef` + S18/S19 |
+| `4b01d3d` | 进程名改写**只在 guest 进程**生效（实测主进程也被改成 `mark.via`，污染容器探测） |
+| `c0394e8` | **`candidatesFor` 必须过滤已占用 stub**（否则 "New instance" 永远拿 `Standard00` → 同 affinity → 折叠回同一 task）；`bringToFront` 成败落盘 + UI 消息反映真实结果；`StubRegistryTest` R4 |
 
 ### 14.2 Step 3 的测试设计（哪些进哪个 job）
 
