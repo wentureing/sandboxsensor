@@ -516,6 +516,17 @@ adb shell run-as com.nextvm.app ls files/            # checks.log / debug-trace.
 
 ---
 
+## 十三、可观测性与插桩（本轮约束）
+
+- 详细结论见 `../记录/记录-诊断通道与零代码调试手段.md`。
+- 本轮**不新增诊断文件通道**（不碰 `diag_channels.tsv` / C++ `.inc`）；slot 事件复用两条 shared 通道：
+  - `checks.log`：`DiagnosticsHolder.stage("slot", …)` → `S slot released stubs slot=N killed=k/total`（主进程已 install）；
+  - `debug-trace.log`：`DebugTrace.event/fail` + 所有 `Timber.*`（debug 包自动进文件）；
+  - 失败：`DiagnosticsHolder.error("slot", …)` → `E slot …`（同步直写，不丢）。
+- `GuestBreadcrumb` **不用于**主进程 slot 事件：它绑 guest 沙箱 filesDir，混进去会破坏 C1–C12 的逐行契约。
+- 真机判定的"零代码"通道：`ps -A`（pid 是否复用）、`dumpsys activity activities`（taskId / affinity 是否新建）、
+  `run-as com.nextvm.app cat files/checks.log`（slot 事件）、Perfetto（时间线复核）。
+
 ## 实际变更（Step 0a / 0b，2026-11-27 落地中）
 
 ### 容器仓库（`_ref/ShitJumpingVM`，分支 `baseline-v150`）

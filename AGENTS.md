@@ -757,6 +757,42 @@ const inst = adb('shell', `run-as ${PKG} timeout 25 sh -c 'until ls ${DATA} | gr
 
 ---
 
+## 规则 20：debug 包的诊断输出走 `core/common` 的通道（不要只打 `Timber`）
+
+> **2026-11-27 用户要求**：「debug 版本适当使用 common 中的诊断能力，关注重要过程。」
+> 详细对照表与"零代码调试手段"见 `docs/输出/记录/记录-诊断通道与零代码调试手段.md`。
+
+### 怎么选通道（先看这条，再写日志）
+
+| 想记录的东西 | 用什么 | 落到哪 | 谁消费 |
+| --- | --- | --- | --- |
+| **关键路径的阶段转移 / 状态机事件**（低频） | `DiagnosticsHolder.stage(tag, msg)` | `files/checks.log` 的 `S <tag> <msg>` | 自检 / 探针 / 人读 |
+| **失败 / 异常（不能丢）** | `DiagnosticsHolder.error(tag, msg, cause)` | `files/checks.log` 的 `E …`（同步直写） | 同上 |
+| **结构化验证结果**（ok/fail/skip + 上下文） | `DiagnosticsHolder.check(CheckResult)` | `checks.log` | 探针按前缀解析 |
+| **自由文本 / 细节**（含所有 `Timber.*`） | `DebugTrace.event/detail/fail` 或直接 `Timber` | `files/debug-trace.log`（`DebugTrace` 是全局 Timber tree，debug 包才 plant） | 人读 |
+| **guest 启动链顺序**（要进 golden 契约） | `GuestBreadcrumb.*` | 沙箱 `<files>/breadcrumb-<pid>.log` | `BreadcrumbGoldenContractTest` |
+| **新增一个诊断文件** | 先改 `core/common/src/main/resources/diag_channels.tsv` → `node tools/gen/gen-diag-channels.mjs` → `node tools/lint/check-diag-channels.mjs` | 生成物 `core/hook/src/main/cpp/core/diag_channels.inc` | C++ `is_container_diag_path` 配额判断 |
+
+### 硬约束
+
+1. **只打 `Timber` 不算"可判定"**：logcat 会被 ROM 吞（干净安装换 uid 后整进程无输出）。
+   重要过程必须能被 `run-as cat files/checks.log` 或 `files/debug-trace.log` 读到。
+2. **不要用 `GuestBreadcrumb` 写主进程事件**：它绑当前进程的 filesDir，主进程写会污染 guest 生命周期，
+   破坏 golden C1–C12 的"两次逐行相等"契约。
+3. **不要把任意文本塞进 `checks.log` 的 `check()`**：那是探针解析的结构化结果；事件用 `stage()`。
+4. **新增日志文件必须走 TSV 三件套**（改 TSV → 生成 → check），不许在代码里硬编码新文件名：
+   否则 C++ 侧不认这个前缀，Java IO 日志配额会被这些写入占满。
+5. **`release` 安全**：以上 API 在非 debug 包自动空转（`DebugFlags.isDebugBuild()`），业务代码不需要自己判断。
+
+### 自检（提交前）
+
+```powershell
+node tools/lint/check-diag-channels.mjs _ref/ShitJumpingVM   # 通道契约（改了日志文件名时必跑）
+node tools/lint/kotlin-lint.mjs <改动目录>                     # 括号/KDoc
+```
+
+---
+
 ## 交接要点（2026-11-26 深夜，B4-4 a–e 完成后）
 
 1. **设备包**：`1.0.0-db5ba0b`（versionCode 125），容器代码 `0798d4b`
