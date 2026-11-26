@@ -1,6 +1,6 @@
 # 项目状态（STATUS）
 
-> 最后更新：**2026-11-26（容器 `7d25feb` / versionCode 122：STOP + guest 自检 + S7/S8 已上机）**
+> 最后更新：**2026-11-26（容器 `7d25feb` / versionCode 122；本轮新增启动链 golden + 11 条契约）**
 > 本文件只回答「当前状态」。文档怎么找见 `docs/README.md`；
 > **历史事实/边界**见 `docs/输出/记录/记录-STATUS20261125-归档.md`；
 > **被推翻的结论**见 `docs/archive/错误结论-2026-11/`（引用任何结论前先对照一遍）。
@@ -23,6 +23,7 @@
 | 容器自检 | `SELF_CHECK` **6 → 8 项**（+S7 真实规则抽样、+S8 诊断写入不计 total）；**主进程 + guest 双进程**（请求文件 + 首次 resume 消费），仅 debug 包 | `docs/输出/变更/20261126-selfcheck-guest.md` |
 | 实例停止（缺陷修复） | 原 `killProcess` 只改记录不杀进程 → 新增 `GuestProcessStopper`（SIGKILL）+ `CmdReceiver STOP`；STOP 后二次 LAUNCH 产生**新 bind** | `docs/代码镜像/core/virtualization/lifecycle/GuestProcessStopper.md` |
 | 过时发现 | `J19/J20` 在容器刚启动时稳定 `NameNotFound`，**重启+等 10s 自愈** → 归为"就绪依赖"，见 `docs/架构/架构-就绪依赖与早期窗口.md` | 实测三轮 |
+| **启动链 golden + 契约** | 采集脚本改为 **STOP + LAUNCH**（原脚本被重复拼接坏、等待恒真）；4 份 golden（via ×2 / probe ×2，**归一化后逐行一致**）→ 11 条契约测试 `BreadcrumbGoldenContractTest` | `docs/架构/架构-启动链契约.md`、`docs/输出/变更/20261126-启动链golden与契约测试.md` |
 
 | 项 | 状态 |
 | --- | --- |
@@ -50,6 +51,7 @@
 | 合成路径「族根」翻译（ROOT_FORM，Java+C++） | ✅ |
 | 容器自检（8 项 × 主+guest 双进程） / 诊断通道 | ✅ |
 | 实例停止（STOP，真杀进程） | ✅ 本轮新增 |
+| **guest 启动链顺序断言（11 条 golden 契约）** | ✅ 本轮新增 |
 | WebView `file://` MIME | ❌ |
 | 跨进程文件选择器 / NIO / 多实例 / 反检测接线 | ❌ / ⏸ |
 
@@ -59,12 +61,14 @@
 
 | # | 问题 | 现状 / 下一步 |
 | --- | --- | --- |
-| 1 | **B4-4 启动链拆分** | 前置：**4 份 breadcrumb golden**（2 guest × 2 次）待采；采集脚本 `tools/device/capture-breadcrumb-golden.ps1` 需改成 `STOP + LAUNCH`（STOP 已可用） |
+| 1 | **B4-4 启动链拆分** | 前置**已完成**：4 份 breadcrumb golden（via/probe 各 2 次，归一化逐行一致）+ 11 条契约（`架构-启动链契约.md`）。下一步：按"阶段表 + 每阶段一个类"定拆分边界（先列"未来要改什么"） |
 | 2 | **WebView MIME** | 已知（F1–F13 归档）；两条路（hook `loadUrl` / 内置 WebView）均未做 |
 | 3 | `J19/J20` 早期窗口 | 容器启动 10s 内 `getApplicationInfo(自己)` 会 `NameNotFound`；根治方案见 `架构-就绪依赖与早期窗口.md` §三（INSTALL 后立即入 PM 表） |
 | 4 | 探针 `P25/P26` fail | `BadTokenException`（`decor token=false attached=false`）——待确认是探针取样时机还是窗口包装缺陷 |
 | 5 | 探针 `J26/J27` fail = **设计故意** | 探针故意用字面量宿主路径检测"写穿"；`debug.nextvm.javaIo` 默认 `0`（开启会破坏真实应用，见 v141）→ Java 层字面量不翻译 → `ENOENT`。**判读时跳过**，不是能力缺失。判据与对照项见 `docs/现状/容器能力清单与回归方法.md` 第三节 |
 | 6 | 探针 `ProbeRunner` 剩余拆分（R1） | 不紧急；前置项集合契约已建立（99 项，`check-probe-ids.mjs`） |
+| **7** | **`StubRegistry` stub 泄漏（2026-11-26 实测新发现，用户决定暂不修）** | `resolveStub` 把 stub 放进 `inUseStubs`，但生产代码**从不调用** `releaseStub`/`releaseAllStubsForSlot` → 每个 slot 启动 5 次后 `LAUNCH_ACTIVITY` 报 `No available stub for process slot N`（`VirtualEngine.kt:634`）。临时处置：重启容器。证据与修法见变更文档 §九 N1 |
+| **8** | 两个实例共用同一 `processSlot` | `processSlot` 是安装时持久化的值，容器重启后内存 `slots` 表为空 → `LIST` 可见 `mark.via` 与 `com.sandbox.probe` 同为 `slot=1`；与 #7 叠加时更早失败。未修 |
 
 ---
 

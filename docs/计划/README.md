@@ -5,14 +5,17 @@
 
 ---
 
-## 一、当前在办（2026-11-24）
+## 一、当前在办（2026-11-26）
 
 | 优先 | 事项 | 状态 | 文档 |
 | --- | --- | --- | --- |
-| ✅ **完成** | **Java 层文件 I/O 重定向语义等价重构**（v148：ErrnoException/EINTR/引用缓存 + 拆分 JavaIoHooks） | 已实现，待真实应用回归 | `../输出/记录/记录-JavaIoHook导致Via不可交互.md`、`../代码镜像/core/hook/JavaIoHooks.md` |
-| **P0** | **语义等价重构清单（后续批次）** | 📋 待逐项执行 | `计划-语义等价重构清单.md` |
-| **P1** | 重新评估「假 dataDir 让 WebView 走标准分支」 | ❌ **已否证**（dataDir 归属不是 MIME 变量） | `../输出/记录/记录-假dataDir假设被否证.md` |
-| **P2** | 补齐注入位置（`setupPathFidelityRedirections` / `registerVirtualSdcard` / `installDeferredProxies`） | 📋 待验证 | `../架构/架构-注入时机审计.md` |
+| **B4-4（当前主线）** | **启动链拆分**：VAM 的 `bindApplication` / `createApplication` / `initContentProviders` / LoadedApk 注入 / `bindViaFrameworkLoadedApk`（~700 行，VAM 现 2350 行） | **前置已完成**：4 份真机 golden + 11 条契约；下一步=定拆分边界（阶段表，每阶段一个类） | `计划-拆分进度与顺序.md` §1.3 / §二、`../架构/架构-启动链契约.md` |
+| B5（其后） | `ActivityThreadHook` 核心块（~950 行） | 等 B4-4 的契约方法成熟后再做 | `计划-ActivityThreadHook与Binder语义重构.md` |
+| ⏸ **C++** | `native-hook.cpp`（7471 行）整文件拆 TU / 继续抽纯逻辑 | **用户 2026-11-26：不要轻易修改 C++** → 暂停，不再作为候选 | `计划-大文件拆包与职责导出.md` §四（B2 行） |
+| P0 | 语义等价重构清单（后续批次） | 📋 待逐项执行 | `计划-语义等价重构清单.md` |
+| P1 | 重新评估「假 dataDir 让 WebView 走标准分支」 | ❌ **已否证**（dataDir 归属不是 MIME 变量） | `../输出/记录/记录-假dataDir假设被否证.md` |
+| P2 | 补齐注入位置（`setupPathFidelityRedirections` / `registerVirtualSdcard` / `installDeferredProxies`） | 📋 待验证 | `../架构/架构-注入时机审计.md` |
+| ✅ 完成 | Java 层文件 I/O 重定向语义等价重构（v148：ErrnoException/EINTR/引用缓存 + 拆分 JavaIoHooks） | 已实现，待真实应用回归 | `../输出/记录/记录-JavaIoHook导致Via不可交互.md`、`../代码镜像/core/hook/JavaIoHooks.md` |
 
 ## 二、待执行（按优先级）
 
