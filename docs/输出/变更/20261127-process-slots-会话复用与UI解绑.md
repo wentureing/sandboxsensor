@@ -535,6 +535,18 @@ adb shell run-as com.nextvm.app ls files/            # checks.log / debug-trace.
 | --- | --- |
 | `2ba51b1` | **Step 0a**：`SlotStatus.kt` / `SlotLeaseRegistry.kt` / `SlotReconciler.kt` / `SlotStatusProbe.kt` + `SlotReconcilerTest`（S1–S13）+ `SlotLeaseRegistryTest`（L1–L7）+ `VirtualEngine.slotStatus()`（只读，未接线） |
 | `cbe6dea` | **Step 0b**：`ProcessSlotsViewModel.kt` / `ProcessSlotsScreen.kt`（只读列表）+ `SettingsViewModel`（计数改用 `slotStatus()`）+ `SettingsScreen`（行可点）+ `MainActivity`（路由 `settings/process_slots`） |
+| `c21d56e` | **Step 1**：`stopApp` 在 `SIGKILL` 之后归还 stub（双守卫）+ 三通道插桩（`checks.log` 的 `S slot …` / `debug-trace.log` / Timber）+ `StubRegistryTest` R1–R3 |
+| `a3bb33c` | **Step 2 + 日志优先级**：`launchApp` 会话复用（有活会话 → `AppTask.moveToFront()`；进程在但无界面 → 沿用租约里的 stub 重开）+ 租约登记/释放 + `DebugFlags.SESSION_REUSE` 开关；`No available stub` 改 E 级 + `E slot` 落盘；`CmdReceiver` LAUNCH 失败改 `Log.e`；Launcher 错误提示优先（不再排在 "Launched xxx" 后面） |
+
+### 14.1 日志优先级修复（用户 2026-11-27 实测反馈）
+
+> 现象：第 6 次 `No available stub for process slot N` 会被 `Launched xxx` 压制，在 "Launched xxx" 存在期间不出现。
+
+| 位置 | 根因 | 修法 |
+| --- | --- | --- |
+| `VirtualEngine.launchApp` stub 不足 | 只 `return VmResult.Error(...)`，**没有日志** → 上层 `Log.i` 把错误当普通结果打 | `DiagnosticsHolder.error("slot", …)` + `DebugTrace.fail` + `Timber.e`，并把 instance/mode 带进消息 |
+| `CmdReceiver` LAUNCH / LAUNCH_ACTIVITY | 结果一律 `Log.i` | `VmResult.Error` → `Log.e`，成功仍 `Log.i` |
+| `LauncherScreen` effects | `collect { showSnackbar(...) }` **串行阻塞**：成功提示显示期间（~4s），错误 effect 根本没被处理 | 错误：先 `currentSnackbarData?.dismiss()` 再 `launch { showSnackbar(Long) }`；成功：`launch { … }` 且**有错误在场时跳过**（错误优先） |
 
 ### 主仓库
 

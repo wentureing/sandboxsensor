@@ -1,9 +1,9 @@
 # 变更：L1 stub 归还（Step 1）
 
 - 日期：2026-11-27
-- 状态：**代码已落地（待 CI + 真机）**
+- 状态：**已提交（`c21d56e`），待 CI + 真机**
 - 上游计划：`20261127-process-slots-会话复用与UI解绑.md` §十（分步表）、§十一（Step 1 严格计划）、§3.2（副作用研究）
-- 容器提交：见 §四（`stopApp` + `StubRegistryTest` R1–R3）
+- 容器提交：`c21d56e`（`stopApp` + `StubRegistryTest` R1–R3 + 三通道插桩）
 
 ---
 
