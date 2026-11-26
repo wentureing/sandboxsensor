@@ -682,3 +682,35 @@ core/virtualization/diag/
 | `DiagChannelTest.C2` 在 L1 改动后变红 | 行为偏移（应当变） | 改写为 `keepTail=false` + 新增 R1–R3，变更文档写明 |
 
 **反作弊**：不许把"行为偏移"说成"笔误"来省一次回退验证——提交信息里的分类与"回退验证结果"必须能对上；对不上按 18.1 处理（禁止为变绿改断言）。
+
+### 18.5 区分「未就绪」与「真的坏了」（2026-11-26）
+
+容器的每个能力都是**在 AOSP 生命周期的某个时刻插进去的**，所以存在「准备 → 生效」时间线。
+看到窗口内的"空/失败"，先归类，再判回归（详见 `docs/架构/架构-就绪依赖与早期窗口.md`）：
+
+| 类型 | 典型 | 处置 |
+| --- | --- | --- |
+| **R1 注册顺序** | PM 实例表、路径规则注册点（v142）、`DiagnosticsHolder.install` | **能根治就根治**（如 INSTALL 后立即入 PM 表） |
+| **R2 初始化窗口** | LoadedApk/CL 替换、WebView factory、Instrumentation 换装 | 只能保顺序，用契约测试锁住 |
+| **R3 异步产出** | watchdog stackdump（+0.3…+20s）、trace、探针报告（~2s） | **必须带 `ageMs` / `not-yet` 三态** |
+
+工作习惯（三条）：
+1. **判读带时间**：`not-yet` ≠ `missing`，报告里要给 `ageMs`；
+2. **要等就用就绪探测**（轮询某条件成立），固定 `sleep` 只作兜底上限；
+3. **归因顺序固定**：先问"有没有就绪依赖" → 再按 18.4 做回退验证判是否真回归。
+
+---
+
+## 交接要点（2026-11-26 收尾）
+
+1. **设备包**：`1.0.0-7d25feb`（versionCode 122），容器代码 `bc73808`。
+   干净安装后必须重授 appops（`MANAGE_EXTERNAL_STORAGE allow`）并**重新导入 guest**
+   （`/data/local/tmp/probe-new.apk`、`/data/local/tmp/via.apk`）。
+2. **冒烟三连**：`SELF_CHECK`（预期 `ok=8 fail=0`）→ 探针 `round`（98 项，`ok 55 / fail 4`：
+   J26/J27 已知边界 + P25/P26 窗口 token）→ Via 启动看 breadcrumb `bind complete`。
+3. **别信早期窗口**：容器刚启动 10s 内 `J19/J20` 会 `NameNotFound`（重启+10s 自愈）；
+   探针报告在 `LAUNCH` 后约 **2s** 就绪（脚本轮询即可，别固定等 30s）。
+4. **改容器后本地必过**：`kotlin-lint` / `check-imports` / `check-duplicate-imports` /
+   `check-diag-channels` / `check-probe-ids` / `gen-diag-channels --check`（全部毫秒级）。
+5. **主线下一步**：采 4 份 breadcrumb golden（2 guest × 2 次，用 `STOP + LAUNCH`）→ 写 10 条契约
+   → B4-4 拆分（**为改而拆**：阶段表 + 每阶段一个类，先列"未来要改什么"再定边界）。
