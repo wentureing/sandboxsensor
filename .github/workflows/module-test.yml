@@ -72,17 +72,21 @@ jobs:
         run: |
           set -euo pipefail
           g++ --version | head -n1
-          g++ -std=c++17 -Wall -Wextra -Werror=return-type -O1 \
-            -I core/hook/src/main/cpp/core \
-            core/hook/src/main/cpp/core/path_rules.cpp \
-            core/hook/src/test/cpp/path_rules_test.cpp \
+          CORE=core/hook/src/main/cpp/core
+          TEST=core/hook/src/test/cpp
+          g++ -std=c++17 -Wall -Wextra -Werror=return-type -O1 -I "$CORE" \
+            "$CORE/path_rules.cpp" "$CORE/path_pattern.cpp" "$TEST/path_rules_test.cpp" \
             -o /tmp/path_rules_test
+          g++ -std=c++17 -Wall -Wextra -Werror=return-type -O1 -I "$CORE" \
+            "$CORE/path_pattern.cpp" "$TEST/path_pattern_test.cpp" \
+            -o /tmp/path_pattern_test
 
-      - name: Run golden vectors (shared with Kotlin)
+      - name: Run golden vectors (shared with Kotlin) + pattern vectors
         working-directory: container
         run: |
           set -euo pipefail
           /tmp/path_rules_test core/hook/src/test/resources/golden/path_vectors.tsv
+          /tmp/path_pattern_test
 
   module-test:
     runs-on: ubuntu-latest
