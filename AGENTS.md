@@ -471,8 +471,9 @@ node tools/lint/kotlin-lint.mjs <改动的目录或文件>
 # 拆分/迁移代码后**必跑**：源文件的 private 成员有没有被新文件引用
 node tools/lint/kotlin-lint.mjs --deps <源文件> <引用它的新文件>
 
-# 移包/迁移后**必跑**：同模块跨包引用是否漏了 import（要传整个模块 src 目录）
-node tools/lint/check-imports.mjs <模块 src 目录>
+# 移包/迁移/改 app·feature 后**必跑**：import 三类问题（漏 import / 嵌套类写法 / **路径写错**）
+# 必须跨模块一起传，否则跨模块类型会被当成"三方类型"跳过
+node tools/lint/check-imports.mjs _ref/ShitJumpingVM/core _ref/ShitJumpingVM/app _ref/ShitJumpingVM/feature
 
 # 新增/修改 hook 入口时（提示模式，不阻塞）
 node tools/lint/check-hook-idempotent.mjs <目录>
@@ -486,6 +487,11 @@ node tools/lint/check-hook-idempotent.mjs <目录>
 | --- | --- | --- | --- |
 | 1 | 迁移 `CustomerProbes` | `import com.nextvm.core.common.findField` | 1 轮 CI（2 分钟） |
 | 2 | 移包 `LegacyMessageHandlers` | `import ...engine.ActivityThreadHook` | 1 轮 CI（2 分钟） |
+| 3 | **import 路径写错**（2026-11-27） | `CmdReceiver.kt` 写 `...virtualization.engine.VmResult`，实际在 `core:model` | 1 轮 **container-build**（5 分钟；`module-test` 全绿因为不编 `:app`） |
+
+> 第 3 类是"名字对、包错"：旧的"缺 import"检查抓不到（名字确实在 import 列表里），
+> 所以 2026-11-27 给 `check-imports.mjs` 加了**第 3 类检查**（import 路径 vs 真实包），
+> 且要求**跨模块一起扫**（`core` `app` `feature`）——负例/正例已验证。
 
 `check-imports.mjs` 把这类错误提前到**毫秒级**：建立"类型名 → 包"表，
 找出"引用了别包类型但既没 import、也不在嵌套访问里"的地方。
