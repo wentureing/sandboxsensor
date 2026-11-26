@@ -18,7 +18,10 @@ param(
     [string]$ContainerApk,
     [string]$Serial = "10AFA8169Z0039G",
     [string]$Out = "probe-reports",
-    [int]$WaitSec = 30,
+    # 2026-11-26 实测：探针从 LAUNCH_ACTIVITY 到 probe-report.json 更新只需 **2s**，
+    # 原默认 30s 是为了覆盖 watchdog 的 stackdump（+0.3..+20s），但报告本身不等它。
+    # D03 已改成三态（not-yet / missing），所以不必为了 stackdump 拖长等待。
+    [int]$WaitSec = 12,
     [int]$HumanWaitSec = 0,
     [switch]$SkipT1,
     [switch]$Reset
@@ -49,8 +52,9 @@ function W($m) { Write-Host "  [!!] $m" -ForegroundColor Yellow }
 function Info($m) { Write-Host "  $m" -ForegroundColor Gray }
 
 function Wait-Marker([string]$Pattern, [int]$Seconds) {
-    for ($i = 0; $i -lt [Math]::Max(1, [int]($Seconds / 5)); $i++) {
-        Start-Sleep -Seconds 5
+    # 轮询间隔从 5s 降到 1s：实测报告 2s 就绪，粗粒度轮询只会白等。
+    for ($i = 0; $i -lt [Math]::Max(1, [int]($Seconds / 1)); $i++) {
+        Start-Sleep -Seconds 1
         if ((A logcat -d -b all 2>$null) -match $Pattern) { return $true }
     }
     return $false

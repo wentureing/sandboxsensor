@@ -25,7 +25,8 @@ param(
     [string]$Apk,
     [ValidateSet('installed', 'container')][string]$Mode = 'installed',
     [string]$Out = 'probe-reports',
-    [int]$TimeoutSec = 90,
+    # 2026-11-26 实测：报告 2s 内就绪（轮询间隔 700ms 已足够细），90s 只是上限。
+    [int]$TimeoutSec = 30,
     [switch]$Install,
     [string]$Serial,
     [switch]$Reset
