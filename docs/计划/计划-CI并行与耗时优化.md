@@ -83,3 +83,53 @@
 
 这也正是 [Hephaestus PR #4174](https://github.com/hephaestus-build/Hephaestus/pull/4174)
 把"单测/架构测试"拆 job 而不拆"构建"的原因。
+
+---
+
+## 七、测试任务进一步分割（2026-11-26 本轮教训驱动）
+
+### 7.1 本轮暴露的真问题不是耗时，是**可诊断性**
+
+run `45755190655`：`module-test (:core:virtualization)` 判红，但
+
+| 事实 | 后果 |
+| --- | --- |
+| 实际是 `compileDebugKotlin` 失败（`e: GuestDiagnosticsRegistration.kt:18 Unresolved reference 'ApplicationRecord'`） | job 名叫「测试」，报的却是编译错 |
+| 测试报告目录为空 + `if-no-files-found: ignore` | 无报告上传，UI 上只看到"测试失败" |
+| 根因藏在 150 KB 日志里 | 必须下载 zip + grep `e: file` 才知道是什么 |
+
+**结论**：现在的分割粒度（模块级）对**耗时**够用，对**归因**不够。
+
+### 7.2 三条建议（按收益/成本排）
+
+| 优先 | 改动 | 收益 | 成本 |
+| --- | --- | --- | --- |
+| **P0** | **前置编译 job**：matrix 里加 `compile`（`./gradlew :<module>:compileDebugKotlin`），测试 job `needs: compile` | 编译错误被单独标红；"没有测试报告"= 编译没过，一眼可辨 | 小（一个 job + needs；编译产物可复用 Gradle 缓存） |
+| **P0** | **失败时写 job summary**：`if: failure()` 里 grep `^e: file|FAILED|AssertionError|Unresolved` 写 `$GITHUB_STEP_SUMMARY` | 不下载日志就能看到根因 | 小（5 行 shell） |
+| **P1** | **模块内按包分片**：`:core:virtualization` 拆 `lifecycle.*` / `diag.*` / `engine.*` 三片（用现成的 `test_filter`） | 红的片名直接指向包，定位从"模块"到"包" | 中（matrix 扩一维；每片仍需 ~60s 环境成本） |
+
+### 7.3 不建议
+
+| 做法 | 原因 |
+| --- | --- |
+| 按**测试类**分片（100+ 类） | job 数与 60s 环境成本相乘，墙钟反而变长 |
+| 缓存 `container/**/build` 来加速分片 | 假绿风险（见 §四「❌ 不做」） |
+| 把 `cpp-core-test` 并回 Java job | 现在 11s 独立跑，合并会串行 |
+
+### 7.4 什么时候才值得再分（判据）
+
+> 单 job 的**测试执行时间 > 60s** 或 **测试数 > 80** 时才分片；
+> 否则"片数 × 环境成本"会超过收益。
+>
+> 现状：`core:virtualization` 测试执行 ≈ 2s（103 条），瓶颈是编译与环境 —— 所以**先做 P0（编译前置 + summary）**，
+> P1 只在"某片经常单独红"时再做。
+
+### 7.5 本地前置已补强（本轮）
+
+CI 红的真实原因（嵌套类被当顶层类 import）现在能被本地拦住：
+
+| 检查 | 改动 |
+| --- | --- |
+| `tools/lint/check-imports.mjs` | 新增"嵌套类 import 写法"检查（声明缩进 > 0 记为嵌套；`import <pkg>.<Nested>` 报错并给出正确写法），并消除原误报（import 中间段被当引用） |
+
+自测：错写 → `exit=1` 且提示改成 `<pkg>.<Outer>.<Nested>`；正确写法 → `exit=0`。
