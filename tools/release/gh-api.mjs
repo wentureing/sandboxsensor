@@ -286,6 +286,31 @@ if (args[0] === '--dispatch') {
     }
   }
   if (failed > 0) process.exit(1);
+} else if (args[0] === '--delete-asset') {
+  // 删 apk-latest 里的旧产物：node tools/release/gh-api.mjs --delete-asset <asset-id> [...more]
+  // 用法场景：每次编译都往 apk-latest 追加一个 22MB 的 APK，只留最新版本。
+  // 注意：删了要回滚旧版本就得重新编译（产物可由 CI 重建，所以是安全的清理）。
+  const ids = args.slice(1).filter(Boolean);
+  if (ids.length === 0) {
+    console.error('usage: gh-api.mjs --delete-asset <asset-id> [<asset-id> ...]');
+    process.exit(2);
+  }
+  let failed = 0;
+  for (const id of ids) {
+    const r = await request(
+      'api.github.com',
+      `/repos/wentureing/sandboxsensor/releases/assets/${id}`,
+      { Authorization: `Bearer ${token()}` },
+      'DELETE'
+    );
+    if (r.status === 204 || r.status === 200) {
+      console.log(`DELETED asset id=${id} -> HTTP ${r.status}`);
+    } else {
+      failed++;
+      console.error(`DELETE asset id=${id} failed: HTTP ${r.status} ${r.body.toString('utf8').slice(0, 200)}`);
+    }
+  }
+  if (failed > 0) process.exit(1);
 } else {
   const p = args[0];
   if (!p) {

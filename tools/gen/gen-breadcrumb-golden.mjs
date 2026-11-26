@@ -29,10 +29,13 @@ const DEFAULT_OUT = path.join(
   'src', 'test', 'resources', 'breadcrumb-golden',
 );
 
-/** 采样组：同一 guest 的两个样本必须逐行一致（同一容器版本、同一路径） */
+/** 采样组：同一 guest 的两个样本必须逐行一致（同一容器版本、同一路径、同一开关） */
 const GROUPS = [
   { guest: 'mark.via', tags: ['via-1', 'via-2'] },
   { guest: 'com.sandbox.probe', tags: ['probe-1', 'probe-2'] },
+  // legacy bind 路径（setprop debug.nextvm.frameworkBind 0 采集），见 变更/20261126-legacy-bind-golden.md
+  { guest: 'mark.via', tags: ['via-legacy-1', 'via-legacy-2'] },
+  { guest: 'com.sandbox.probe', tags: ['probe-legacy-1', 'probe-legacy-2'] },
 ];
 
 /** 单行归一化：去掉时间前缀 + 抹掉每轮必变、以及"重构就会变"的字面量 */

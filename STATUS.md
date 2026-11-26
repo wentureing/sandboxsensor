@@ -69,6 +69,7 @@
 | 6 | 探针 `ProbeRunner` 剩余拆分（R1） | 不紧急；前置项集合契约已建立（99 项，`check-probe-ids.mjs`） |
 | **7** | **`StubRegistry` stub 泄漏（2026-11-26 实测新发现，用户决定暂不修）** | `resolveStub` 把 stub 放进 `inUseStubs`，但生产代码**从不调用** `releaseStub`/`releaseAllStubsForSlot` → 每个 slot 启动 5 次后 `LAUNCH_ACTIVITY` 报 `No available stub for process slot N`（`VirtualEngine.kt:634`）。临时处置：重启容器。证据与修法见变更文档 §九 N1 |
 | **8** | 两个实例共用同一 `processSlot` | `processSlot` 是安装时持久化的值，容器重启后内存 `slots` 表为空 → `LIST` 可见 `mark.via` 与 `com.sandbox.probe` 同为 `slot=1`；与 #7 叠加时更早失败。未修 |
+| **9** | **framework 与 legacy 两条 bind 路径行为不一致**（2026-11-26 采 legacy golden 时发现） | legacy 下 `v138-appctx mInitialApplication` 被改成 guest（framework 不改）；且 via 的 `androidx.startup.InitializationProvider` 在 legacy 下**成功**、framework 下 **FAILED**（emoji2 `ClassNotFoundException`）。哪条是"想要的"未定论 → 已用 C12 把两条路径各自的特征钉住，**拆分时不许顺手对齐**（那是行为变更）。证据见 `docs/架构/架构-启动链契约.md` §二 |
 
 ---
 
