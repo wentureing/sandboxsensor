@@ -268,10 +268,16 @@ core/hook/cpp/hooks_io.cpp                        →  docs/代码镜像/core/ho
 **CI 粒度**（2026-11-25 起）：`module-test` 已是**模块级 matrix**（virtualization / hook / sandbox 并行），
 整模块失败不再连坐；要精确定位用 `test_filter` 输入（按包/类名）。
 
+**`compile-app` job（2026-11-27 新增，用户允许）**：`module-test` 现在**额外起一个 job 只编 `:app`**
+（Gradle 会自动带上全部 `:feature:*`），不跑测试。理由：`feature`/`app` 层的 Kotlin 类型错误只有编译器能查，
+而 matrix 只编 `:core:*` —— 这类错误已两次漏到 `container-build`（`VmResult` import 路径错、`sealed Effect` 未 `when`）。
+只编 app、不跑测试，缓存命中约 1–2 分钟；只想快跑 core 测试时传 `compile_app=false` 跳过。
+
 ```powershell
 node tools/release/gh-api.mjs --dispatch module-test.yml main \
   ref="baseline-v150" modules=":core:virtualization" \
   test_filter="com.nextvm.core.virtualization.diag.*"
+# 改的是 app/feature：不要传 compile_app=false
 ```
 
 **为什么按包**：整模块测试会连坐（一个包改坏、全模块红），按包跑能直接定位到刚拆的那部分，

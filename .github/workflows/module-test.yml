@@ -26,6 +26,9 @@ on:
       test_filter:
         description: '可选：只跑匹配的测试类（Gradle --tests 语法；建议只配一个 module）'
         default: ''
+      compile_app:
+        description: '顺带编译 :app（含全部 :feature:*）—— 防 app/feature 层编译错误漏到 container-build；false 跳过'
+        default: 'true'
 
 permissions:
   contents: read
@@ -87,6 +90,99 @@ jobs:
           set -euo pipefail
           /tmp/path_rules_test core/hook/src/test/resources/golden/path_vectors.tsv
           /tmp/path_pattern_test
+
+  # 仅编译 :app（Gradle 会自动带上全部 :feature:*）—— 2026-11-27 新增，用户允许。
+  # 动机：feature/app 层的 Kotlin 类型错误只有编译器能查，而 matrix 只编 :core:*，
+  # 这类错误已两次漏到 container-build（5 分钟）：
+  #   1) CmdReceiver 的 `VmResult` import 路径错；
+  #   2) ProcessSlotsScreen 的 `sealed Effect` 未 when 就取 message。
+  # 只编译、不跑测试、不打包；缓存命中时 ~1–2 分钟。
+  # 需要更快跑 core 测试时可传 compile_app=false 跳过本 job。
+  compile-app:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    if: ${{ inputs.compile_app != 'false' }}
+
+    steps:
+      - name: Checkout container source
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.repo || 'wentureing/ShitJumpingVM' }}
+          ref: ${{ inputs.ref || 'main' }}
+          path: container
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Cache Android SDK (shared with container build)
+        id: sdk-cache
+        uses: actions/cache@v4
+        with:
+          path: .android-sdk
+          key: sdk-${{ env.SDK_PLATFORM }}-bt${{ env.BUILD_TOOLS }}-ndk${{ env.NDK_VERSION }}-cmake${{ env.CMAKE_VERSION }}-${{ env.CACHE_EPOCH }}
+          restore-keys: |
+            sdk-${{ env.SDK_PLATFORM }}-bt${{ env.BUILD_TOOLS }}-ndk${{ env.NDK_VERSION }}-cmake${{ env.CMAKE_VERSION }}-
+
+      - name: Install Android SDK components
+        if: steps.sdk-cache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          SDKMAN="$(ls -1 /usr/local/lib/android/sdk/cmdline-tools/*/bin/sdkmanager 2>/dev/null | head -n1 || true)"
+          if [ -z "${SDKMAN:-}" ] || [ ! -x "${SDKMAN}" ]; then
+            SDKMAN="$(command -v sdkmanager || true)"
+          fi
+          if [ -z "${SDKMAN:-}" ]; then
+            echo "::error::sdkmanager not found on runner"; exit 1
+          fi
+          mkdir -p "$ANDROID_SDK_ROOT"
+          yes | "$SDKMAN" --sdk_root="$ANDROID_SDK_ROOT" --licenses > /dev/null 2>&1 || true
+          "$SDKMAN" --sdk_root="$ANDROID_SDK_ROOT" --install \
+            "platforms;${SDK_PLATFORM}" \
+            "build-tools;${BUILD_TOOLS}" \
+            "platform-tools" \
+            "ndk;${NDK_VERSION}" \
+            "cmake;${CMAKE_VERSION}"
+
+      - name: Setup JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Cache Gradle home
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper/dists
+          key: gradle-home-${{ env.GRADLE_VERSION }}-libs-${{ hashFiles('container/gradle/libs.versions.toml') }}-${{ env.CACHE_EPOCH }}
+          restore-keys: |
+            gradle-home-${{ env.GRADLE_VERSION }}-libs-${{ env.CACHE_EPOCH }}-
+            gradle-home-${{ env.GRADLE_VERSION }}-${{ env.CACHE_EPOCH }}
+            gradle-home-${{ env.GRADLE_VERSION }}-
+
+      - name: Compile :app (pulls in all :feature:*)
+        working-directory: container
+        run: |
+          set -euo pipefail
+          chmod +x gradlew
+          echo "Compiling :app:compileDebugKotlin (all :feature:* are dependencies)"
+          ./gradlew --no-daemon --stacktrace :app:compileDebugKotlin 2>&1 | tee -a /tmp/gradle-app.log
+
+      - name: Summarize failure
+        if: failure()
+        run: |
+          {
+            echo "### compile-app 失败摘要（:app + :feature:*）"
+            echo ''
+            if [ -f /tmp/gradle-app.log ]; then
+              echo '```'
+              grep -E '^e: |Unresolved reference|error:|FAILED|What went wrong|> Task .* FAILED' /tmp/gradle-app.log \
+                | head -40 || true
+              echo '```'
+            else
+              echo '（没有 /tmp/gradle-app.log —— 失败发生在编译步骤之前）'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
 
   module-test:
     runs-on: ubuntu-latest
