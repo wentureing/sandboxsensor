@@ -63,7 +63,7 @@
 | 2 | **WebView MIME** | 已知（F1–F13 归档）；两条路（hook `loadUrl` / 内置 WebView）均未做 |
 | 3 | `J19/J20` 早期窗口 | 容器启动 10s 内 `getApplicationInfo(自己)` 会 `NameNotFound`；根治方案见 `架构-就绪依赖与早期窗口.md` §三（INSTALL 后立即入 PM 表） |
 | 4 | 探针 `P25/P26` fail | `BadTokenException`（`decor token=false attached=false`）——待确认是探针取样时机还是窗口包装缺陷 |
-| 5 | 已知边界（不再当缺陷） | 字面量宿主路径与 early external 仍写宿主（`javaIo=0`，与 J26/J27 同源）；见 `docs/输出/调研/调研-AOSP-hook契约对照.md` |
+| 5 | 探针 `J26/J27` fail = **设计故意** | 探针故意用字面量宿主路径检测"写穿"；`debug.nextvm.javaIo` 默认 `0`（开启会破坏真实应用，见 v141）→ Java 层字面量不翻译 → `ENOENT`。**判读时跳过**，不是能力缺失。判据与对照项见 `docs/现状/容器能力清单与回归方法.md` 第三节 |
 | 6 | 探针 `ProbeRunner` 剩余拆分（R1） | 不紧急；前置项集合契约已建立（99 项，`check-probe-ids.mjs`） |
 
 ---
