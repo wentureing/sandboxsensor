@@ -63,12 +63,33 @@
 +                    ) {
 +                        frameworkLoadedApks[instanceId]
 +                    } else {
-+                        // 采 legacy 路径样本用：classloader 仍是 framework 建的，
-+                        // 只让 VAM 走手工装配
-+                        GuestBreadcrumb.log("frameworkBind disabled by flag — legacy bind")
++                        // 采 legacy 路径样本用：classloader 仍由 framework 建，只让 VAM 手工装配。
++                        // 不额外打点：路径事实由 bindApplication 的 `frameworkLoadedApk=` 表达，
++                        // 开关取值由 DebugFlags.snapshot() 落到 debug-trace.log。
 +                        null
 +                    }
 ```
+
+### 3.2.1 为什么不加新埋点（事件输出模块复用自查）
+
+项目已有三个事件输出模块，**本批一个都不新增、只复用**：
+
+| 模块 | 通道 | 本批怎么用 |
+| --- | --- | --- |
+| `DebugFlags`（开关统一源） | `setprop debug.nextvm.*` | 新增 `FRAMEWORK_BIND`，并加进 `snapshot()` —— 复用既有 `isOn`/`snapshot` |
+| `DebugTrace`（关键事件/失败） | `debug-trace.log` | **不加新事件**：`DebugFlags.init()` 已在 `bindApplication` 入口调用，`snapshot()` 里就有 `frameworkBind=<值>` |
+| `GuestBreadcrumb`（有序生命周期） | `breadcrumb-<pid>.log` | **不加新事件**：`bind start instance=… frameworkLoadedApk=false` 已表达路径 |
+
+**自查时删掉的两条**（初版写过，属重复记录同一事实）：
+
+| 删掉的 | 已有的等价事实 |
+| --- | --- |
+| `DebugTrace.event("flags", "frameworkBind=false -> legacy bind")` | `DebugFlags.snapshot()`（`flags` 事件，init 时落盘） |
+| `GuestBreadcrumb.log("frameworkBind=false (flag) — legacy bind")` | `bindApplication` 的 `bind start … frameworkLoadedApk=` 字段 |
+
+**怎么区分"开关切换"与"框架失败"**（都不需要新埋点）：
+`frameworkBind=false` + `frameworkLoadedApk=false` + **仍出现** `createFrameworkLoadedApk call` → 开关切换；
+`frameworkBind=true` + `frameworkLoadedApk=false` + `createFrameworkLoadedApk result` 缺失/报错 → 框架失败。
 
 ### 3.3 采集脚本 `-LegacyBind`
 
