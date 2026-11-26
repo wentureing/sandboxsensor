@@ -67,9 +67,9 @@
 | 4 | 探针 `P25/P26` fail | `BadTokenException`（`decor token=false attached=false`）——待确认是探针取样时机还是窗口包装缺陷 |
 | 5 | 探针 `J26/J27` fail = **设计故意** | 探针故意用字面量宿主路径检测"写穿"；`debug.nextvm.javaIo` 默认 `0`（开启会破坏真实应用，见 v141）→ Java 层字面量不翻译 → `ENOENT`。**判读时跳过**，不是能力缺失。判据与对照项见 `docs/现状/容器能力清单与回归方法.md` 第三节 |
 | 6 | 探针 `ProbeRunner` 剩余拆分（R1） | 不紧急；前置项集合契约已建立（99 项，`check-probe-ids.mjs`） |
-| **7** | **`StubRegistry` stub 泄漏（2026-11-26 实测新发现，用户决定暂不修）** | `resolveStub` 把 stub 放进 `inUseStubs`，但生产代码**从不调用** `releaseStub`/`releaseAllStubsForSlot` → 每个 slot 启动 5 次后 `LAUNCH_ACTIVITY` 报 `No available stub for process slot N`（`VirtualEngine.kt:634`）。临时处置：重启容器。证据与修法见变更文档 §九 N1 |
-| **8** | 两个实例共用同一 `processSlot` | `processSlot` 是安装时持久化的值，容器重启后内存 `slots` 表为空 → `LIST` 可见 `mark.via` 与 `com.sandbox.probe` 同为 `slot=1`；与 #7 叠加时更早失败。未修 |
-| **9** | **framework 与 legacy 两条 bind 路径行为不一致**（2026-11-26 采 legacy golden 时发现） | legacy 下 `v138-appctx mInitialApplication` 被改成 guest（framework 不改）；且 via 的 `androidx.startup.InitializationProvider` 在 legacy 下**成功**、framework 下 **FAILED**（emoji2 `ClassNotFoundException`）。哪条是"想要的"未定论 → 已用 C12 把两条路径各自的特征钉住，**拆分时不许顺手对齐**（那是行为变更）。证据见 `docs/架构/架构-启动链契约.md` §二 |
+| **7** | **`StubRegistry` stub 泄漏（2026-11-26 实测新发现，用户决定暂不修）** | `resolveStub` 把 stub 放进 `inUseStubs`，但生产代码**从不调用** `releaseStub`/`releaseAllStubsForSlot` → 每个 slot 启动 5 次后 `LAUNCH_ACTIVITY` 报 `No available stub for process slot N`（`VirtualEngine.kt:634`）。临时处置：重启容器。**已登记到 `docs/计划/计划-启动链已知缺陷（重构后修复）.md` L1，重构完成后统一修** |
+| **8** | 两个实例共用同一 `processSlot` | `processSlot` 是安装时持久化的值，容器重启后内存 `slots` 表为空 → `LIST` 可见 `mark.via` 与 `com.sandbox.probe` 同为 `slot=1`；与 #7 叠加时更早失败。**已登记 L2，重构后修** |
+| **9** | **framework 与 legacy 两条 bind 路径行为不一致**（2026-11-26 采 legacy golden 时发现） | legacy 下 `v138-appctx mInitialApplication` 被改成 guest（framework 不改）；且 via 的 `androidx.startup.InitializationProvider` 在 legacy 下**成功**、framework 下 **FAILED**（emoji2 `ClassNotFoundException`）。哪条是"想要的"未定论 → 已用 C12 把两条路径各自的特征钉住，**拆分时不许顺手对齐**（那是行为变更）。证据见 `docs/架构/架构-启动链契约.md` §二。**已登记为 L4/L5/L6，重构后修**；另 legacy 回退路径上 `bin.mt.plus` 崩于 `createApplication`（L3） |
 
 ---
 
@@ -116,3 +116,4 @@ node tools/release/gh-api.mjs --dispatch module-test.yml main ref="baseline-v150
 ## 5. 排查第一站
 
 > guest 行为异常但没崩溃/没栈 → 先看 `GuestBreadcrumb`（logcat tag `BootCrumb`，文件 `<沙箱>/files/breadcrumb-<pid>.log`）；再判是否"早期窗口"（`docs/架构/架构-就绪依赖与早期窗口.md`）；最后才看探针 P/N/W 系列与 native 栈。
+
