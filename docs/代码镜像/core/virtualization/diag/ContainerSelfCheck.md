@@ -1,9 +1,9 @@
 # ContainerSelfCheck（core:virtualization / diag）
 
 - 代码：`core/virtualization/src/main/java/com/nextvm/core/virtualization/diag/ContainerSelfCheck.kt`
-- 测试：`core/virtualization/src/test/java/com/nextvm/core/virtualization/diag/ContainerSelfCheckTest.kt`（C1–C7）
+- 测试：`core/virtualization/src/test/java/com/nextvm/core/virtualization/diag/ContainerSelfCheckTest.kt`（C1–C9）
 - 触发：`CmdReceiver` 的 `com.nextvm.cmd.SELF_CHECK`
-- 日期：2026-11-25
+- 日期：2026-11-25（2026-11-26 增 S7/S8）
 
 ## 职责
 
@@ -25,7 +25,7 @@
 
 | 函数 | 签名 | 作用 |
 | --- | --- | --- |
-| `run` | `(): List<Check>` | 跑 6 项检查；每项独立 try/catch，单项失败不影响其它 |
+| `run` | `(): List<Check>` | 跑 8 项检查；每项独立 try/catch，单项失败不影响其它 |
 | `report` | `(List<Check>): String` | 生成 `hookcheck ok=N fail=M S1:ok ...` |
 | `ruleHit`（S1） | 私有 | 加临时规则 `/selfcheck/in/ → /selfcheck/out/`，断言 `translate` 命中；finally 删除 |
 | `ruleRemoved`（S2） | 私有 | 删除后断言不再命中（证明"删得掉"，避免规则泄漏） |
@@ -33,6 +33,9 @@
 | `unknownPathUntouched`（S4） | 私有 | 未注册路径必须原样返回（防止误伤） |
 | `diagChannel`（S5） | 私有 | 向 `debug-trace.log` 追加一行并断言长度增长；`diagFile=null` 时 **skipped 视为通过** |
 | `configSanity`（S6） | 私有 | `path_spoof.conf` 存在且含 `[豁免名单]` 段 |
+| `realRuleSample`（S7） | 私有 | 从**真实规则表**抽一条做 `translate` 往返；**空表判失败**（S1/S2 用自造规则，抓不到"规则没注册/注册错进程"） |
+| `diagWriteNotCounted`（S8） | 私有 | 写 3 次诊断后断言 `diag` 增长而 `total` 不变；无 javaIo hook 时记 skipped |
+| `parseIoStats` | 私有 | 解析 `total=N ... diag=N`，缺字段返回 null |
 
 ## 偏差登记
 
@@ -43,6 +46,8 @@
 | 3 | S3 写 **`context.cacheDir/selfcheck`** 而不是 `virtualRoot` | `virtualRoot` 是用户/Files 页面可见目录，写进去会污染（实机踩过）；cacheDir 私有且可回收 | 必要偏差（2026-11-25 修正） | S3 detail 的 `target=.../cache/selfcheck/w/f.txt` |
 | 4 | S6 只检查段名存在，不解析业务内容 | 自检不该复刻配置解析（那由 `PathSpoofConfig` 负责） | 中性偏差 | S6 detail `len=...` |
 | 4 | 不检查 guest 侧（`getFilesDir` 等） | 容器主进程上下文拿不到 guest 的 `Context` | 必要偏差 | 由探针 J 系列覆盖 |
+| 5 | S7 只抽样**第一条**真实规则，不做全量 | 全量由探针 J 系列 + `PathKindsTest` 覆盖；自检只负责"规则表非空且能往返" | 必要偏差 | S7 detail 含 `rules=N from=...` |
+| 6 | S8 只写 `debug-trace.log`（shared 段） | 该文件在 `diag_channels.tsv` 的 `shared` 段，C++ 才会计入 `diag`；换通道可能绕过断言 | 必要偏差 | S8 detail 的 `diagDelta` / `totalDelta` |
 
 ## 约束与坑
 

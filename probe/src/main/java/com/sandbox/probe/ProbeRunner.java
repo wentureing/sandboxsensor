@@ -37,6 +37,12 @@ public final class ProbeRunner {
     /** 本轮只跑重点：默认 round（路径 J* / 写入 F* / 诊断 D*），其余记 skipped。 */
     private final ProbeSuite suite = ProbeSuite.current();
 
+    /** 探针启动时刻（elapsedRealtime），用于区分「时序未到」与「真的缺失」。 */
+    private final long startedElapsedMs = android.os.SystemClock.elapsedRealtime();
+
+    /** watchdog 的 stackdump 在 bind 后 +0.3s…+20s 分批写入；超过该阈值仍无才算缺失。 */
+    private static final long STACKDUMP_WAIT_MS = 25_000L;
+
     public ProbeRunner(Context ctx) {
         this.ctx = ctx;
         this.pkg = ctx.getPackageName();
@@ -101,7 +107,11 @@ public final class ProbeRunner {
         });
         put("D03", "diag", "stackdump.exists", () -> {
             File f = new File(files, "stackdump-" + pid + ".log");
-            return "exists=" + f.exists() + " size=" + (f.exists() ? f.length() : 0L);
+            if (f.exists()) return "exists=true size=" + f.length();
+            // 三态：报告可能早于 watchdog 的 +0.3s…+20s 转储点，那时不是"缺失"
+            long age = android.os.SystemClock.elapsedRealtime() - startedElapsedMs;
+            String state = age < STACKDUMP_WAIT_MS ? "not-yet" : "missing";
+            return "exists=false state=" + state + " ageMs=" + age;
         });
         put("D04", "diag", "log.total", () -> {
             File[] fs = files.listFiles();
@@ -874,31 +884,42 @@ public final class ProbeRunner {
 
     /**
      * 合并 UiProbe 在 UI 线程采到的结果（PopupWindow / 子窗口，uiprobe 大类 P24-P27）。
-     * 必须在 ProbeActivity 里先跑过 UiProbe.run()，否则这里是空的。
+     * 必须在 ProbeActivity 里先跑过 UiProbe.run()，否则这些项会记 skipped。
      */
     private void probeUiEntries() {
-        org.json.JSONArray ui;
+        JSONArray ui = null;
         try {
             ui = UiProbe.takeEntries();
-        } catch (Throwable t) {
-            put("P24", "uiprobe", "takeEntries", () -> {
-                throw new IllegalStateException("UiProbe.takeEntries failed: " + t);
-            });
-            return;
+        } catch (Throwable ignored) {
+            // 落到下面统一记账，绝不静默消失
         }
-        if (ui == null) {
-            return;
-        }
-        synchronized (entries) {
-            for (int i = 0; i < ui.length(); i++) {
-                try {
-                    entries.put(ui.getJSONObject(i));
-                } catch (Throwable ignored) {
-                    // 单条失败不影响其余
+        java.util.Set<String> seen = new java.util.HashSet<>();
+        if (ui != null) {
+            synchronized (entries) {
+                for (int i = 0; i < ui.length(); i++) {
+                    try {
+                        JSONObject o = ui.getJSONObject(i);
+                        entries.put(o);
+                        seen.add(o.optString("id"));
+                    } catch (Throwable ignored) {
+                        // 单条失败不影响其余
+                    }
                 }
             }
         }
+        // 缺项必须显式记账：同一 suite 两轮运行的项数不能变（2026-11-26 实测 98 vs 94 都判绿）
+        for (String[] e : UI_ENTRIES) {
+            if (!seen.contains(e[0])) putSkipped(e[0], "uiprobe", e[1]);
+        }
     }
+
+    /** uiprobe 的固定项表（缺项时按此补 skipped，保证报告项数稳定）。 */
+    private static final String[][] UI_ENTRIES = {
+        {"P24", "new View(activity)"},
+        {"P25", "PopupWindow.showAtLocation"},
+        {"P26", "addView(ATTACHED_DIALOG)"},
+        {"P27", "window/decorView"},
+    };
 
     // ------------------------------------------------------------------ native
 
