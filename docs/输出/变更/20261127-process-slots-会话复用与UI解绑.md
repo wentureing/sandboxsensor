@@ -537,6 +537,20 @@ adb shell run-as com.nextvm.app ls files/            # checks.log / debug-trace.
 | `cbe6dea` | **Step 0b**：`ProcessSlotsViewModel.kt` / `ProcessSlotsScreen.kt`（只读列表）+ `SettingsViewModel`（计数改用 `slotStatus()`）+ `SettingsScreen`（行可点）+ `MainActivity`（路由 `settings/process_slots`） |
 | `c21d56e` | **Step 1**：`stopApp` 在 `SIGKILL` 之后归还 stub（双守卫）+ 三通道插桩（`checks.log` 的 `S slot …` / `debug-trace.log` / Timber）+ `StubRegistryTest` R1–R3 |
 | `a3bb33c` | **Step 2 + 日志优先级**：`launchApp` 会话复用（有活会话 → `AppTask.moveToFront()`；进程在但无界面 → 沿用租约里的 stub 重开）+ 租约登记/释放 + `DebugFlags.SESSION_REUSE` 开关；`No available stub` 改 E 级 + `E slot` 落盘；`CmdReceiver` LAUNCH 失败改 `Log.e`；Launcher 错误提示优先（不再排在 "Launched xxx" 后面） |
+| `6eef94d` | **P1**：`LaunchPlanner`（纯决策）+ `StubRegistry.candidatesFor/markInUse` + 引擎接线 + `LaunchPlannerTest` P1–P9；同时修复 `CmdReceiver` 的 `VmResult` import 路径（编译错误） |
+| `5c3ad00` | 修复 `dropLease` 语义（无租约时不算"丢"；P3 断言） |
+| `1289a97` | **Step 3**：① guest 进程名适配（`getRunningAppProcesses` 本进程条目 → guest 包名）；② 长按改为"启动新实例"（`forceNewSession`，新 stub→新 task，同进程）；③ STALE 自动回收（`reconcileSlots`）；④ 按 task 清理（`cleanupTask`/`cleanupSlot`，**不杀进程**）+ 列表接线（task 展开、逐个 Close）；⑤ `SlotStatus.tasks` / `TaskRef` + S18/S19 |
+
+### 14.2 Step 3 的测试设计（哪些进哪个 job）
+
+| 层 | 覆盖 | 在哪个 job |
+| --- | --- | --- |
+| 纯逻辑单测 | `SlotReconcilerTest` S1–S19（含 S18 `tasks` 升序、S19 跨 slot 不混）、`SlotLeaseRegistryTest` L1–L9、`SlotUsageTest` U1–U5、`SessionReusePolicyTest` R1–R8、`LaunchPlannerTest` P1–P9、`StubRegistryTest` G1–G10/R1–R3 | **`module-test (:core:virtualization)`**（matrix 分支，纯 JUnit） |
+| 契约 | `BreadcrumbGoldenContractTest` C1–C12 × 8 样本（启动链未改，护栏） | 同一个 job（同一模块 test source set） |
+| Android 层（不可纯 JVM） | 进程名改写 `getRunningAppProcesses`、`forceNewSession`、`reconcileSlots`、`cleanupTask/cleanupSlot`、Compose 列表接线 | **无 job** → 真机判据（U1/U2/U6/U7，见 §8.3） |
+
+> 结论：**本轮所有可自动化测试都落在 `module-test` 的 `:core:virtualization` job**；`feature:settings`/`feature:launcher`/`app` 没有 test job（设计文档 §三 的判据：逻辑已下沉到 core 纯函数，UI 只做绑定）。
+
 
 ### 14.1 日志优先级修复（用户 2026-11-27 实测反馈）
 
