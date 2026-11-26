@@ -57,6 +57,7 @@ const files = targets.flatMap(collect);
 
 // 第一遍：建立「类型名 -> 所在包」表（仅同模块内定义的类型）
 const typeToPackage = new Map();
+const nestedTypes = new Map(); // 类型名 -> 所在包（声明带缩进 = 嵌套在某个类里）
 const fileInfo = new Map(); // file -> {pkg, imports:Set, ownTypes:Set, code}
 const TYPE_DECL = /\b(?:class|interface|object|enum\s+class|typealias)\s+([A-Z]\w*)/g;
 
@@ -66,15 +67,44 @@ for (const file of files) {
   const imports = new Set();
   for (const m of src.matchAll(/^\s*import\s+([\w.]+)/gm)) {
     imports.add(m[1]);                       // 全限定
-    imports.add(m[1].split('.').pop());      // 简单名
+    // 每一段都算「已 import」：嵌套类 import（a.b.Outer.Inner）会让 Outer 出现在代码里，
+    // 不登记就会误报「引用了 Outer 但未 import」
+    for (const seg of m[1].split('.')) imports.add(seg);
   }
   const ownTypes = new Set();
   const code = stripCode(src);
   for (const m of code.matchAll(TYPE_DECL)) {
     ownTypes.add(m[1]);
+    // 声明所在行的缩进 > 0 ⇒ 嵌套在某个类体里（顶层的 data class 前缀里没有缩进）
+    const lineStart = code.lastIndexOf('\n', m.index) + 1;
+    const indent = (code.slice(lineStart, m.index).match(/^[ \t]*/) || [''])[0].length;
+    if (indent > 0) nestedTypes.set(m[1], pkg);
     if (!typeToPackage.has(m[1])) typeToPackage.set(m[1], pkg);
   }
   fileInfo.set(file, { pkg, imports, ownTypes, code });
+}
+
+// 第二遍之前：嵌套类不能用「顶层 import」形式（真实踩过：ApplicationRecord 是
+// VirtualApplicationManager 的嵌套类，写成 lifecycle.ApplicationRecord 编译报 Unresolved reference）
+let nestedImportProblems = 0;
+for (const [file, info] of fileInfo) {
+  const src = readFileSync(file, 'utf8');
+  for (const m of src.matchAll(/^\s*import\s+([\w.]+)/gm)) {
+    const fq = m[1];
+    const simple = fq.split('.').pop();
+    const nestedPkg = nestedTypes.get(simple);
+    if (!nestedPkg) continue;
+    const importedPkg = fq.split('.').slice(0, -1).join('.');
+    if (importedPkg === nestedPkg) {
+      nestedImportProblems++;
+      console.log(
+        `${file}: 嵌套类 ${simple} 被当作顶层类 import —— 应写成 ${nestedPkg}.<Outer>.${simple}`,
+      );
+    }
+  }
+}
+if (nestedImportProblems > 0) {
+  console.log(`\n共 ${nestedImportProblems} 处嵌套类 import 写法错误——编译会报 Unresolved reference。`);
 }
 
 // 第二遍：找「引用了别包类型但没 import」
@@ -105,6 +135,10 @@ if (problems) {
   console.log(`\n共 ${problems} 处「同模块跨包引用缺 import」—— 编译会报 Unresolved reference。`);
   console.log('修法：在文件 import 区加上对应的全限定名。');
   console.log('注意：若报的是同名局部变量/类型别名等误报，请人工确认后忽略。');
-  process.exit(1);
 }
+if (nestedImportProblems) {
+  console.log(`\n共 ${nestedImportProblems} 处嵌套类 import 写法错误 —— 编译会报 Unresolved reference。`);
+  console.log('修法：把 `<pkg>.<Nested>` 改成 `<pkg>.<Outer>.<Nested>`。');
+}
+if (problems || nestedImportProblems) process.exit(1);
 console.log(`import 完整性检查通过（${files.length} 个文件，${typeToPackage.size} 个类型）`);
