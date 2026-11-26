@@ -450,6 +450,23 @@ node tools/release/gh-api.mjs "/repos/wentureing/sandboxsensor/actions/runs?per_
 例外：只有下一步动作**必须以构建产物为前提**（例如要装包验证）时，才单独查一次；
 若仍 in_progress 就留到下一轮再查，不要死等。
 
+## 下载 Release asset：**必须用浏览器式 URL，不要走 API asset 路径**（2026-11-27 实测）
+
+`gh-api.mjs --asset` 现在走
+`https://github.com/wentureing/sandboxsensor/releases/download/<tag>/<asset>`
+（= 浏览器点 releases 页面的同一条路径）+ 浏览器 headers（UA / Referer / Accept-Language），
+**不再用** `api.github.com/repos/.../releases/assets/<id>`。
+
+| 方式 | 22MB 容器 APK 实测 |
+| --- | --- |
+| `api.github.com/.../assets/<id>` + `Accept: application/octet-stream` | 90s <4MiB、多次被中断/超时（判风控/限速） |
+| **`github.com/.../releases/download/apk-latest/<name>`（浏览器式）** | **3.3s 完成**，sha256 与 API `digest` 一致 |
+
+其它约定：
+- 代理默认 `GH_PROXY_MODE=proxy`（`127.0.0.1:12450`）；直连用 `GH_PROXY_MODE=direct` 显式切换；
+- 下载有 **150s 总超时**（不再只有 TLS 空闲超时）+ 每 4MiB 一行 `[dl] … KiB`；失败自己报错退出、不挂住宿主；
+- 下完必须校验：`sha256` 与 release API 的 `digest` 一致、大小一致（日志会打 `saved … (N bytes) via releases/download/apk-latest`）。
+
 ## 构建变体与签名
 
 - **CI 构建的是 `:app:assembleDebug`**（`container-build.yml` 的默认 `task` 与执行行）
