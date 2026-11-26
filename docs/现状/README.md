@@ -33,7 +33,7 @@
 | `WebViewWarmup`（provider 预热/修复） | ✅ 生效 | guest bind complete 时调度 |
 | v138 进程 Application → guest | ✅ 生效 | 探针 W32：`currentApplication()` 的 class 是 `ProbeApplication` |
 | **WebView `file://` 的 MIME** | ❌ **未解决** | 沙箱 `.html` → `text/plain`（Via 主页显示源码） |
-| **process slot 只读观测（Step 0a/0b）** | ⚠️ **已落地，待真机验证** | 新增 `core/virtualization/process/`（`SlotStatus` / `SlotLeaseRegistry` / `SlotReconciler` / `SlotStatusProbe`）；引擎 `slotStatus()` 只读；设置页计数改为"真在跑的 slot"，新增只读列表页。**尚未改变启动/回收行为**（会话复用 Step 2、自愈 Step 3）。见 `../输出/变更/20261127-process-slots-会话复用与UI解绑.md` |
+| **process slot 观测 + 会话复用 + 按 task 清理（Step 0a–3）** | ⚠️ **核心链路已真机验证，UI 待人工** | `core/virtualization/process/`（`SlotStatus` / `SlotLeaseRegistry` / `SlotReconciler` / `SlotStatusProbe` / `SlotUsage` / `SessionReusePolicy` / `LaunchPlanner`）；`slotStatus()` 只读、`reconcileSlots()` 回收 STALE、`cleanupTask/cleanupSlot` 按 task 清理（不杀进程）、`launchApp(forceNewSession)` 开新会话；设置页计数 = 真跑的 slot。**实测**（`1.0.0-291aab7`）：再点同一 guest `Reused live session`（pid 不变）、STOP 后 `released stubs slot=0 killed=1/1`、池子可循环。见 `../输出/变更/20261127-process-slots-会话复用与UI解绑.md`、`../架构/架构-slot租约与进程术语.md` |
 | `AntiDetectionEngine`（805 行 / 40+ 处 hide/spoof） | ❌ **零调用** | 见 `零调用扫描报告.md` |
 | `IdentitySpoofingEngine`（`Build.SERIAL` 等） | ❌ **零调用** | README 明示"未应用" |
 | `FileAccessInterceptor`（fake content / listFiles） | ❌ **零调用** | v141 另写了 native 实现 |
