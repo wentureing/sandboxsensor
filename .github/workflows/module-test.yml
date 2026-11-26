@@ -92,7 +92,10 @@ jobs:
       # 模块级并行：每个模块一个 job，互不连坐，墙钟不再叠加。
       # 用户 2026-11-25：#42/#44 单 job 串行跑到 8 分钟，要求拆分。
       matrix:
-        module: [":core:virtualization", ":core:hook", ":core:sandbox"]
+        # 2026-11-26：补 :core:common —— 日志/诊断相关的单测（DiagChannel / DiagOutput /
+        # CheckResult / DiagnosticsRouter）全在这个模块，之前不在 matrix 里，
+        # 传 modules=":core:common" 只会让三个 job 的测试步骤全部 skip 而**假绿**。
+        module: [":core:common", ":core:virtualization", ":core:hook", ":core:sandbox"]
 
     steps:
       - name: Checkout container source
@@ -109,6 +112,24 @@ jobs:
           echo "repo=${{ inputs.repo || 'wentureing/ShitJumpingVM' }}"
           echo "ref=${{ inputs.ref || 'main' }}"
           echo "modules=${{ inputs.modules || ':core:virtualization :core:sandbox' }}"
+          echo "matrix.module=${{ matrix.module }}"
+
+      # 日志通道契约检查（毫秒级，不需要 SDK）：放在测试之前，早了断。
+      # 只跑一个 job，其它 matrix 分支跳过，避免 4 份重复。
+      - name: Checkout lint tools (sensor repo)
+        if: matrix.module == ':core:common'
+        uses: actions/checkout@v4
+        with:
+          repository: wentureing/sandboxsensor
+          ref: main
+          path: sensor
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Diag channel contract (DiagFiles vs native kMarkers)
+        if: matrix.module == ':core:common'
+        working-directory: container
+        run: node ../sensor/tools/lint/check-diag-channels.mjs .
 
       # SDK 缓存与 container-build 共用同一套 key（避免重复下载 ~780MB）
       - name: Cache Android SDK (shared with container build)
@@ -180,16 +201,13 @@ jobs:
         if: always()
         working-directory: container
         run: |
-          echo '===== test source files ====='
-          find . -path '*/src/test/*' -name '*.kt' -print 2>/dev/null | head -30
-          echo '===== core/hook build dir ====='
-          ls -la core/hook/build 2>/dev/null || echo '(no build dir)'
-          echo '===== debugUnitTest class files ====='
-          find core/hook/build -name '*.class' 2>/dev/null | grep -i unit | head -30
-          echo '===== classes dumps ====='
-          find core/hook/build -name '*NativeHookBridgePathTest*' 2>/dev/null | head -10
-          echo '===== settings core:hook ====='
-          grep -n 'core:hook' settings.gradle.kts || true
+          MODULE="${{ matrix.module }}"
+          MOD_DIR=$(echo "${MODULE}" | sed 's|^:||; s|:|/|g')
+          echo "===== module: ${MODULE} (dir=${MOD_DIR}) ====="
+          echo '===== test sources ====='
+          find "${MOD_DIR}/src/test" -name '*.kt' -print 2>/dev/null | head -30 || true
+          echo '===== test-results ====='
+          ls -la "${MOD_DIR}/build/test-results/testDebugUnitTest" 2>/dev/null || echo '(none yet)'
       - name: Run module unit tests
         # matrix 展开后每个 job 只跑自己那个模块；inputs.modules 用于显式指定子集。
         if: ${{ inputs.modules == '' || contains(inputs.modules, matrix.module) }}
@@ -207,9 +225,31 @@ jobs:
             ./gradlew --no-daemon --stacktrace "${MODULE}:testDebugUnitTest"
           fi
 
+      # 假绿守卫：2026-11-26 实测 run 45737628896 —— 传 modules=":core:common" 时
+      # 三个 job 的测试步骤全被 skip，job 仍绿，等于什么都没验证。
+      # 这里直接数测试 XML 的 tests= 总和，0 就失败。
+      - name: Assert tests actually ran
+        # 只在"本 job 真的该跑测试"时校验（否则显式指定 modules 会让其它 job 误报红）。
+        if: ${{ always() && (inputs.modules == '' || contains(inputs.modules, matrix.module)) }}
+        working-directory: container
+        run: |
+          set -euo pipefail
+          MOD_DIR=$(echo "${{ matrix.module }}" | sed 's|^:||; s|:|/|g')
+          XML_DIR="${MOD_DIR}/build/test-results/testDebugUnitTest"
+          if [ ! -d "$XML_DIR" ]; then
+            echo "::error::没有测试结果目录：${XML_DIR}（模块没跑测试）"; exit 1
+          fi
+          total=$(grep -ho 'tests="[0-9]*"' -r "$XML_DIR" --include='*.xml' 2>/dev/null \
+            | sed 's/[^0-9]//g' | awk '{s+=$1} END {print s+0}')
+          classes=$(ls -1 "$XML_DIR"/*.xml 2>/dev/null | wc -l)
+          echo "module=${{ matrix.module }} testClasses=$classes tests=$total"
+          if [ "${total:-0}" -eq 0 ]; then
+            echo "::error::${{ matrix.module }} 一个测试都没跑（filter 不匹配或测试被 skip）"; exit 1
+          fi
+
       # 诊断序列模板（DiagnosticsSequenceOutputTest 写到 build/diagnostics/）
       - name: Show diagnostics sequence
-        if: always()
+        if: always() && matrix.module == ':core:common'
         working-directory: container
         run: |
           if [ -f core/common/build/diagnostics/checks-template.txt ]; then
@@ -217,7 +257,7 @@ jobs:
             cat core/common/build/diagnostics/checks-template.txt
             echo "===== END ====="
           else
-            echo "（本次未生成诊断序列）"
+            echo "::warning::core:common 跑过但没有 checks-template.txt（DiagnosticsSequenceOutputTest 没执行？）"
           fi
       - name: Publish test report
         if: always()
