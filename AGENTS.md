@@ -71,6 +71,20 @@ git remote set-url origin https://github.com/wentureing/sandboxsensor.git
 
 采集一律用：`adb logcat -d -b all -v threadtime > file`（不带 `-c`）。
 
+### 等待约定：容器 10s，guest 只看 golden（2026-11-26 用户要求）
+
+| 场景 | 等多久 | 判据 |
+| --- | --- | --- |
+| **容器（主进程）刚启动** | **固定等 ≥10s** | 早期窗口：虚拟 PM 的包列表未就绪，`J19/J20` 会 `NameNotFoundException`；见 `docs/架构/架构-就绪依赖与早期窗口.md` |
+| **guest 启动后**（`LAUNCH` / `LAUNCH_ACTIVITY`） | **不必长等**，轮询到 **golden 要素**出现即可 | `breadcrumb` 里出现 `bind start` / `bind complete` / `cb onActivityResumed`（实测 0.2–1s）；探针报告 ~2s。上限 10s 足够，**不要**固定 sleep 30–40s |
+
+**两个不要**：
+
+1. 不要用 `logcat` 判定（干净安装会换容器 uid，vivo 会吞该 uid 进程的 I 级日志 —— 实测干净安装后
+   `logcat --pid=<容器pid>` 完全无输出，而 `files/checks.log` / `files/debug-trace.log` 一直在更新）。
+   **判定一律读 `run-as` 下的文件**：`files/checks.log`（SELF_CHECK 结果）、sandbox 实例目录、`breadcrumb-<pid>.log`。
+2. 不要把"容器没响应广播"当成容器坏了：先用文件证据（`debug-trace.log` 是否在长）确认它活着，再判。
+
 ## 设计理念（改动前第一道尺子）
 
 > **`docs/设计/设计-项目设计理念.md`** —— 三条理念，与任何改动冲突时，要么改改动，要么先改这份文档。
