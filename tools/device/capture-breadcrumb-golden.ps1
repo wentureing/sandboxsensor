@@ -45,7 +45,9 @@ param(
     [int]$HostWaitSec = 15,
     [string]$Out = 'probe-reports/golden',
     # 采完不把 guest 停掉（默认停：保持设备干净，下次启动才有新 pid）
-    [switch]$KeepRunning
+    [switch]$KeepRunning,
+    # 强制走 legacy bind（setprop debug.nextvm.frameworkBind 0），采完自动复位
+    [switch]$LegacyBind
 )
 
 $ErrorActionPreference = 'Stop'
@@ -84,6 +86,14 @@ else { Info "引擎就绪（LIST 已列出 $Guest）" }
 
 New-Item -ItemType Directory -Force -Path $Out | Out-Null
 $outDir = (Resolve-Path $Out).Path
+
+# 本次采集的 bind 路径：**显式设置**（不依赖上一次的残留），结束时复位成默认。
+# 开关机制见 core/common/DebugFlags.kt（setprop debug.nextvm.<flag>）。
+$bindFlag = if ($LegacyBind) { '0' } else { '' }
+Sh "setprop debug.nextvm.frameworkBind '$bindFlag'"
+Info ("bind 路径 = {0}" -f $(if ($LegacyBind) { 'legacy（frameworkBind=0）' } else { 'framework（默认）' }))
+
+try {
 
 # ---------------------------------------------------------------- 1 定位实例
 $listing = Sh "run-as $HostPkg ls $DataRoot"
@@ -221,4 +231,10 @@ if ($seg.Count -lt 8) { Die "采集到的事件过少（$($seg.Count) 行），�
 if (-not $KeepRunning) {
     Cmd 'STOP' "--es instance $inst"
     Info "已 STOP $inst（-KeepRunning 可保留）"
+}
+
+} finally {
+    # 复位 bind 开关：不清掉的话，下一次 framework 样本会被静默采成 legacy
+    Sh "setprop debug.nextvm.frameworkBind ''"
+    Info 'frameworkBind 已复位（默认值）'
 }
