@@ -212,6 +212,22 @@ jobs:
           find "${MOD_DIR}/src/test" -name '*.kt' -print 2>/dev/null | head -30 || true
           echo '===== test-results ====='
           ls -la "${MOD_DIR}/build/test-results/testDebugUnitTest" 2>/dev/null || echo '(none yet)'
+      # 编译前置（2026-11-26）：本轮 run 45755190655 的教训 ——
+      # 实际是 compileDebugKotlin 失败（嵌套类被当顶层类 import），但 job 名叫「测试」、
+      # 测试报告为空，归因要靠下载 150KB 日志 grep。
+      # 把编译单独拆成一个 step：它红了就是编译错，测试 step 不执行，一眼可辨。
+      # 用 step 而不是独立 job：job 级要重跑 checkout/SDK/Gradle 缓存恢复（约 60s/模块），
+      # 收益不抵成本；step 级同样能单独标红。
+      - name: Compile (debug) — 编译错误在这里就红
+        if: ${{ inputs.modules == '' || contains(inputs.modules, matrix.module) }}
+        working-directory: container
+        run: |
+          set -euo pipefail
+          chmod +x gradlew
+          MODULE="${{ matrix.module }}"
+          echo "Compiling: ${MODULE}:compileDebugKotlin"
+          ./gradlew --no-daemon --stacktrace "${MODULE}:compileDebugKotlin" 2>&1 | tee -a /tmp/gradle.log
+
       - name: Run module unit tests
         # matrix 展开后每个 job 只跑自己那个模块；inputs.modules 用于显式指定子集。
         if: ${{ inputs.modules == '' || contains(inputs.modules, matrix.module) }}
@@ -224,10 +240,35 @@ jobs:
           echo "Running: ${MODULE}:testDebugUnitTest filter='${FILTER}'"
           if [ -n "$FILTER" ]; then
             ./gradlew --no-daemon --stacktrace "${MODULE}:testDebugUnitTest" \
-              --tests "$FILTER" -DfailOnNoMatchingTests=false
+              --tests "$FILTER" -DfailOnNoMatchingTests=false 2>&1 | tee -a /tmp/gradle.log
           else
-            ./gradlew --no-daemon --stacktrace "${MODULE}:testDebugUnitTest"
+            ./gradlew --no-daemon --stacktrace "${MODULE}:testDebugUnitTest" 2>&1 | tee -a /tmp/gradle.log
           fi
+
+      # 失败时把根因行直接放进 job summary（2026-11-26 新增）：
+      # 不下载日志就能看到 `e: file…Unresolved reference` / `FAILED` / `AssertionError`。
+      - name: Summarize failure
+        if: failure()
+        run: |
+          {
+            echo "### module-test 失败摘要（${{ matrix.module }}）"
+            echo ''
+            if [ -f /tmp/gradle.log ]; then
+              echo '```'
+              grep -E '^e: |Unresolved reference|FAILED|AssertionError|expected:|What went wrong|Could not|> Task .* FAILED' /tmp/gradle.log \
+                | head -40 || true
+              echo '```'
+              echo ''
+              echo '<details><summary>Gradle 日志尾部（最后 40 行）</summary>'
+              echo ''
+              echo '```'
+              tail -40 /tmp/gradle.log || true
+              echo '```'
+              echo '</details>'
+            else
+              echo '（没有 /tmp/gradle.log —— 失败发生在编译/测试步骤之前）'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
 
       # 假绿守卫：2026-11-26 实测 run 45737628896 —— 传 modules=":core:common" 时
       # 三个 job 的测试步骤全被 skip，job 仍绿，等于什么都没验证。
