@@ -502,7 +502,11 @@ detekt / ktlint / semgrep **都不做完整类型解析**，查不出「未定�
   提交前可扫一遍注释区的 /**。
 - **凭据**：`token.txt` 不入库、不读取内容到对话中；脚本内读取后立即用于请求
 - **产物命名**：`<类型>-<7位sha>[-<abi>].apk`
-- **容器 command 通道**：`adb shell am broadcast -n com.nextvm.app/.CmdReceiver -a com.nextvm.cmd.{INSTALL|LAUNCH|LAUNCH_ACTIVITY|UNINSTALL|LIST|COLLECT_OUT|LIST_OUT|CAT_OUT}`
+- **容器 command 通道**：`adb shell am broadcast -n com.nextvm.app/.CmdReceiver -a com.nextvm.cmd.{INSTALL|STOP|LAUNCH|LAUNCH_ACTIVITY|UNINSTALL|LIST|COLLECT_OUT|LIST_OUT|CAT_OUT|SELF_CHECK|SPOOF_EXEMPT_ADD|SPOOF_EXEMPT_REMOVE|SPOOF_EXEMPT_LIST}`
+  - **`STOP --es instance <instanceId>`（2026-11-26 新增）**：真正停实例 = 逻辑终止 + `SIGKILL`
+    真实进程。**之前 `killProcess(instanceId)` 只把记录改成 `KILLED`，进程一直活着**，
+    导致"再 LAUNCH 复用旧进程、拿不到新的 bind"（采 breadcrumb golden 时踩到）。
+    `UNINSTALL` 会删实例与数据，`STOP` 不会——要"重启 guest 但保留数据"用 STOP + LAUNCH。
   - `LAUNCH_ACTIVITY --es pkg <pkg> --es activity <完整类名>`：容器启动 guest 时**只解析 LAUNCHER**，要起非 LAUNCHER 页面必须用这条
   - 结果统一打到 `logcat -d -s CmdReceiver`
   - **导入通道（2026-11-23 22:30 更正）**
