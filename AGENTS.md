@@ -69,7 +69,8 @@ git remote set-url origin https://github.com/wentureing/sandboxsensor.git
 脚本侧：`auto-test.ps1`、`collect-probe.ps1`、`diag-boot-loop.ps1` 均带**复位守卫**，不带 `-Reset` 会直接返回。
 需要复位时显式传 `-Reset`。
 
-采集一律用：`adb logcat -d -b all -v threadtime > file`（不带 `-c`）。
+采集（取证）用：`adb logcat -d -b all -v threadtime > file`（不带 `-c`）。
+**但判定要用文件，不要用 logcat** —— 原因见下一节。
 
 ### 等待约定：容器 10s，guest 只看 golden（2026-11-26 用户要求）
 
@@ -489,7 +490,10 @@ node tools/lint/check-hook-idempotent.mjs <目录>
 `check-imports.mjs` 把这类错误提前到**毫秒级**：建立"类型名 → 包"表，
 找出"引用了别包类型但既没 import、也不在嵌套访问里"的地方。
 
-已知误报：嵌套类访问（`Outer.Inner`）、全限定写法 —— 已在规则里排除，仍有少量需人工判断。
+**嵌套类 import 也会被抓（2026-11-26 加）**：`import <pkg>.<Nested>` 会直接报错并提示写成
+`<pkg>.<Outer>.<Nested>` —— 这是本轮 CI 红的真实原因（`ApplicationRecord` 是 VAM 的嵌套类）；
+同时消除了旧版「import 行中间段被当成引用」的误报。
+仍可能误报：`Outer.Inner` 形式的嵌套访问、全限定写法。
 
 退出码 0 = 通过。**两个命令都在毫秒级**，不需要 Gradle / Android SDK。
 
@@ -715,16 +719,63 @@ core/virtualization/diag/
 
 ---
 
-## 交接要点（2026-11-26 收尾）
+## 规则 19：脚本途径 —— 多步逻辑用 Node，不要硬扛 PowerShell（2026-11-26 用户允许更换）
 
-1. **设备包**：`1.0.0-7d25feb`（versionCode 122），容器代码 `bc73808`。
-   干净安装后必须重授 appops（`MANAGE_EXTERNAL_STORAGE allow`）并**重新导入 guest**
-   （`/data/local/tmp/probe-new.apk`、`/data/local/tmp/via.apk`）。
-2. **冒烟三连**：`SELF_CHECK`（预期 `ok=8 fail=0`）→ 探针 `round`（98 项，`ok 55 / fail 4`：
-   J26/J27 已知边界 + P25/P26 窗口 token）→ Via 启动看 breadcrumb `bind complete`。
-3. **别信早期窗口**：容器刚启动 10s 内 `J19/J20` 会 `NameNotFound`（重启+10s 自愈）；
-   探针报告在 `LAUNCH` 后约 **2s** 就绪（脚本轮询即可，别固定等 30s）。
-4. **改容器后本地必过**：`kotlin-lint` / `check-imports` / `check-duplicate-imports` /
-   `check-diag-channels` / `check-probe-ids` / `gen-diag-channels --check`（全部毫秒级）。
-5. **主线下一步**：采 4 份 breadcrumb golden（2 guest × 2 次，用 `STOP + LAUNCH`）→ 写 10 条契约
-   → B4-4 拆分（**为改而拆**：阶段表 + 每阶段一个类，先列"未来要改什么"再定边界）。
+> 本轮**同一个脚本连续踩了 5 个 PowerShell 坑**，每次都要一轮"改—跑—看错—再改"。
+> 用户明确："允许更换脚本途径。"
+
+### 分工
+
+| 场景 | 用什么 | 理由 |
+| --- | --- | --- |
+| **多步逻辑**（等待、轮询、解析输出、条件分支、二进制） | **Node `.mjs`** | 无引号层、无变量展开、`Buffer` 二进制安全、可 `JSON.parse` |
+| 单行只读（`pidof`/`dumpsys`/`getprop`）、git、gradle、CI dispatch | `pwsh` 一行 | 已经够用，别为一行写脚本 |
+| 已有 `.ps1` 设备脚本 | **保留，不强制重写**；**新功能优先写成 `.mjs`** | 避免大改引入回归 |
+
+### 本轮的 5 个实证坑（都是 PowerShell 特有）
+
+| # | 坑 | 现象 | 根因 |
+| --- | --- | --- | --- |
+| 1 | **三层引号** | 设备端 `sh -c '...'` 里的 `'bind complete'` 被拆成两个参数，grep 报错、判定恒假 | pwsh 双引号 → adb → 设备 sh，每层都吃一次引号 |
+| 2 | **`$` 提前展开** | `$((i+1))` 报"术语 i+1 不会被识别" | PowerShell 先解析 `$(` |
+| 3 | **`cmd /c ... > file` 静默 0 字节** | 截图/screencap 产物 0 字节 | 宿主路径含中文 + cmd 代码页 |
+| 4 | **二进制经文本通道损坏** | `> file` 重定向破坏 PNG | PowerShell 按文本解码 |
+| 5 | **`"$name:"` 报错** | `变量引用无效` | `:` 被当 scope 修饰符 |
+
+### Node 的等效写法（推荐模板）
+
+```js
+import { execFileSync } from 'node:child_process';
+const adb = (...args) => execFileSync('adb', ['-s', SERIAL, ...args], { encoding: 'utf8' }).trim();
+// 设备端等待：把轮询放到设备上，一次调用拿到结果
+const inst = adb('shell', `run-as ${PKG} timeout 25 sh -c 'until ls ${DATA} | grep -q ${pkg}; do sleep 0.2; done; ls ${DATA} | grep ${pkg} | tail -1'`);
+```
+
+- **参数用数组传**（`execFileSync(cmd, [args])`），不要再拼字符串 —— 引号问题从源头消失；
+- 设备端脚本仍然要遵守「不用 `$( )`、不用单引号」的两条约束（那是**设备 sh 的约束**，与宿主语言无关）；
+- 判定只读文件（见「等待约定」），不读 logcat。
+
+---
+
+## 交接要点（2026-11-26 深夜，B4-4 a–e 完成后）
+
+1. **设备包**：`1.0.0-db5ba0b`（versionCode 125），容器代码 `0798d4b`
+   （含 B4-4a…4e 拆分 + 嵌套类 import 修复）。**干净安装已实测通过**（见 2）。
+2. **一条命令跑完冒烟**：
+   ```powershell
+   node tools/release/gh-api.mjs --asset container-shitjumpingvm-db5ba0b.apk dist\c.apk
+   .\tools\device\clean-install-and-test.ps1 -Apk dist\c.apk
+   ```
+   判据：`SELF_CHECK ok=8 fail=0` / 探针 `entries=98 fail=2`（J26/J27 设计故意）/ via `bind complete` + `onActivityResumed`。
+   脚本已按「等待约定」改造：容器等 10s、每步 1 次 adb 调用、判定只读文件、不截图。
+3. **等待与判定**：见上文「等待约定」一节。**容器 10s；guest 只看 golden 要素；判定不用 logcat**。
+4. **改容器后本地必过**（毫秒级）：
+   `kotlin-lint` / `check-imports`（**含嵌套类 import 检查**）/ `check-duplicate-imports` /
+   `check-diag-channels` / `check-probe-ids` / `gen-diag-channels --check` / `gen-breadcrumb-golden --check`。
+5. **主线进度**：B4-4 已完成 **a（Application 创建/Provider 初始化）、b（onCreate/ApplicationInfo）、
+   c（ActivityThread 补丁/后台任务）、d（栈转储/壳追踪）、e（诊断装配/LoadedApk 补丁）**；
+   `VirtualApplicationManager` **4 589 → 1 795 行（−61%）**。
+   剩余批次与边界见 `docs/计划/计划-B4-4剩余批次边界.md`（**B4-4f** legacy attach 链 + 壳/运行时修正 → g → h）。
+6. **已知缺陷（重构后修）**：10 条登记在 `docs/计划/计划-启动链已知缺陷（重构后修复）.md`。
+   最影响操作的两条：**L1 stub 每 slot 只够 5 次启动**（超了要重启容器）、**L2 两实例共用 `slot=1`**。
+7. **触发编译仍是一次一个、手动 dispatch**；`push` 不触发编译（改 workflow / 文档可以随便 push）。
