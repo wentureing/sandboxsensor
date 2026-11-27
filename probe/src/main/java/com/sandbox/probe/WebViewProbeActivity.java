@@ -326,6 +326,8 @@ public class WebViewProbeActivity extends Activity {
         // 依据：W-ext-private(Android/data/<pkg>) = text/plain，W-ext-public(Download) = text/html，
         // 规律是"是否落在 app data 区"。若本组也 text/html，则目标 1 的 WebView 路线定稿。
         final File fExtShared = prepAt("/storage/emulated/0/com.nextvm.app/wvprobe_ext_shared.html");
+        // W-ext-nopkg（第四组）：路径**不含包名**的自建目录 —— 验证"含包名才走嗅探"这个新规律
+        final File fExtNoPkg = prepAt("/storage/emulated/0/vsandbox/wvprobe_ext_nopkg.html");
 
         loadAndCheck("W1", "about:blank", HTML_BODY, false, () ->
             loadAndCheck("W2", ff1 == null ? "about:blank" : "file://" + ff1.getAbsolutePath(),
@@ -360,9 +362,13 @@ public class WebViewProbeActivity extends Activity {
                     loadAndCheck("W-ext-public", fExtPub == null || !fExtPub.exists()
                                     ? "about:blank" : "file://" + fExtPub.getAbsolutePath(),
                             null, false, () ->
-                    // W-ext-shared：共享存储自建目录（非 app-data、非 Download）
+                    // W-ext-shared：共享存储自建目录（但目录名含包名）
                     loadAndCheck("W-ext-shared", fExtShared == null || !fExtShared.exists()
                                     ? "about:blank" : "file://" + fExtShared.getAbsolutePath(),
+                            null, false, () ->
+                    // W-ext-nopkg：共享存储自建目录，路径不含包名（验证新规律）
+                    loadAndCheck("W-ext-nopkg", fExtNoPkg == null || !fExtNoPkg.exists()
+                                    ? "about:blank" : "file://" + fExtNoPkg.getAbsolutePath(),
                             null, false, () ->
                     // v1.19 四组合：把「BOM」这个干扰项控制住
                     //   W2  = 沙箱 + 无 BOM  -> text/plain
@@ -386,7 +392,7 @@ public class WebViewProbeActivity extends Activity {
                                                 status.setText("✅ 全部实验完成 —— 可长按下方文字复制");
                                             });
                                         });
-                            })))))))))))))));
+                            }))))))))))))))));
     }
 
     /**
