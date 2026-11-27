@@ -1,0 +1,60 @@
+diff --git a/core/hook/src/main/cpp/native-hook.cpp b/core/hook/src/main/cpp/native-hook.cpp
+index a45f46b..e558b37 100644
+--- a/core/hook/src/main/cpp/native-hook.cpp
++++ b/core/hook/src/main/cpp/native-hook.cpp
+@@ -2279,6 +2279,19 @@ Java_com_nextvm_core_hook_NativeHookBridge_nativeGetHookStats(
+     return env->NewStringUTF(buf);
+ }
+ 
++/* N2-C 第 2 步：bind 之后由 Kotlin 侧主动触发一次延迟 patch（修复 L6 触发链断裂）。
++ * 返回 true 表示已执行；实际新增库数见 hook stats 的 late_libs。 */
++JNIEXPORT jboolean JNICALL
++Java_com_nextvm_core_hook_NativeHookBridge_nativePatchNewlyLoaded(
++    JNIEnv* env, jobject thiz)
++{
++    (void)env;
++    (void)thiz;
++    if (!g_initialized) return JNI_FALSE;
++    patch_newly_loaded_libraries();
++    return JNI_TRUE;
++}
++
+ /* 最近 N 条「命中翻译 / 失败」的记录，每行：op err=<n> from -> to */
+ JNIEXPORT jstring JNICALL
+ Java_com_nextvm_core_hook_NativeHookBridge_nativeGetFsRecent(
+diff --git a/core/hook/src/main/java/com/nextvm/core/hook/NativeHookBridge.kt b/core/hook/src/main/java/com/nextvm/core/hook/NativeHookBridge.kt
+index 1a5b1dd..f1c4375 100644
+--- a/core/hook/src/main/java/com/nextvm/core/hook/NativeHookBridge.kt
++++ b/core/hook/src/main/java/com/nextvm/core/hook/NativeHookBridge.kt
+@@ -1028,6 +1028,12 @@ class NativeHookBridge @Inject constructor() {
+     /** 关键过程统计的 Kotlin 包装：失败不抛，返回 n/a。 */
+     fun hookStats(): String = runCatching { nativeGetHookStats() }.getOrNull() ?: "n/a"
+ 
++    /** N2-C：bind 之后主动触发一次延迟 patch（修复 L6 触发链断裂）。 */
++    external fun nativePatchNewlyLoaded(): Boolean
++
++    /** 包装：未就绪/native 不可用时返回 false，不抛。 */
++    fun patchNewlyLoaded(): Boolean = runCatching { nativePatchNewlyLoaded() }.getOrDefault(false)
++
+     external fun nativeResetFsStats()
+ 
+     /** Set up /proc/self spoofing at native level. */
+diff --git a/core/virtualization/src/main/java/com/nextvm/core/virtualization/lifecycle/startup/GuestDiagnosticsRegistration.kt b/core/virtualization/src/main/java/com/nextvm/core/virtualization/lifecycle/startup/GuestDiagnosticsRegistration.kt
+index af61565..d5efb77 100644
+--- a/core/virtualization/src/main/java/com/nextvm/core/virtualization/lifecycle/startup/GuestDiagnosticsRegistration.kt
++++ b/core/virtualization/src/main/java/com/nextvm/core/virtualization/lifecycle/startup/GuestDiagnosticsRegistration.kt
+@@ -157,9 +157,13 @@ object GuestDiagnosticsRegistration {
+                     if (wait > 0) Thread.sleep(wait)
+                     elapsed = atMs
+                     try {
++                        // N2-C 第 2 步：先主动触发一次延迟 patch（L6 —— bind 之后
++                        // System.loadLibrary 加载的 app 库本来永远补不上），再取统计。
++                        val patched = nativeHookBridge.patchNewlyLoaded()
+                         com.nextvm.core.common.DebugTrace.event(
+                             "native",
+-                            "hook stats($label): " + nativeHookBridge.hookStats()
++                            "hook stats($label): patchedNewly=$patched " +
++                                nativeHookBridge.hookStats()
+                         )
+                     } catch (_: Throwable) {
+                     }
