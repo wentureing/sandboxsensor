@@ -43,7 +43,9 @@
 3. `maps_line_visible` 的关键词表**属于契约**：想隐藏新的框架特征，先改 `golden/path_spoof_vectors.tsv`，再改表（规则 18.1）。
 4. 热路径（每次 I/O 的 `redirect_path`）：本文件**不许**加日志 / 加锁 / 新增分配；`std::string` 返回值签名保持原样（`设计-native重构与临时适配器.md` §7.3）。
 5. 单测是 `core/hook/src/test/cpp/path_spoof_test.cpp` + `src/test/resources/golden/path_spoof_vectors.tsv`，
-   CI job `cpp-core-test` 里编译 `path_rules.cpp + path_spoof.cpp + path_spoof_test.cpp`（`redirect_path_with_alias` 依赖 `path_rules`）。
+   CI job `cpp-core-test` 里编译 **`path_rules.cpp + path_pattern.cpp + path_spoof.cpp + path_spoof_test.cpp`**。
+   **必须带 `path_pattern.cpp`**：`path_rules.cpp` 内部引用 `pattern_matches` / `pattern_is_root_form` / `parse_pattern`，
+   漏了它会在**链接期**报 `undefined reference`（2026-11-27 CI 首跑就是这么红的）。
 6. 真机判据：`nativeGetHookStats` 的 `maps_lines` / `maps_hidden` 与 `现状-native-关键过程基线.md` 同量级；`spoof=0` 属正常（见该文 §四）。
 7. `guest_pkg` 为空串时行为：合成路径会变成 `/data/app/~~VmK8x2==/-VmK8x2==/base.apk`（不崩、无回退），
    但**没有任何调用方这样传** —— 门面传的是 `g_spoofed_package_name`，未设置时为空串，此时 maps 里不会出现 guest 路径，

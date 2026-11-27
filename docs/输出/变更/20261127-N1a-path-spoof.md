@@ -134,3 +134,26 @@ rm core/hook/src/main/cpp/core/path_spoof.{h,cpp}
 
 见同目录 `20261127-N1a-path-spoof.actual.diff`（`git diff` + `--stat`）。
 与计划的差异：**净 −117 行**（预估 −120 行），新增 6 个转发 + `path_spoof.{h,cpp}`（约 175 行实现 + 45 行声明）。
+
+### CI 首跑（run `45930716340`）与修复
+
+| job | 结果 |
+| --- | --- |
+| `module-test (:core:hook)` / `(:core:virtualization)` / `(:core:sandbox)` / `(:core:common)` | ✅ success |
+| `compile-app` | ✅ success |
+| **`cpp-core-test`** | ❌ **failure** |
+
+失败信息（**分类：编码错误 —— 构建清单漏项**，规则 18.4）：
+
+```
+path_rules.cpp:(.text+0x126): undefined reference to `nextvm::path::pattern_matches(…)`
+path_rules.cpp:(.text+0x135): undefined reference to `nextvm::path::pattern_is_root_form(…)`
+path_rules.cpp:(.text+0x180): undefined reference to `nextvm::path::parse_pattern(…)`
+collect2: error: ld returned 1 exit status
+```
+
+**回退验证**：不是行为问题 —— 报错发生在**链接期**，且同一命令里 `path_rules.cpp` 本身没改；
+缺的是 `path_pattern.cpp` 这个 TU（`path_spoof_test` 的编译行只带了 `path_rules + path_spoof`）。
+**修法**：workflow 该行补 `"$CORE/path_pattern.cpp"`；镜像文档「约束与坑」第 5 条同步写明这条依赖。
+
+> 结论：N1a 的 C++ 逻辑本身没有编译错误（`path_spoof.cpp` 编过了），只在链接期暴露了构建清单遗漏。
