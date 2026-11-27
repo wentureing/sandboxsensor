@@ -29,7 +29,7 @@
 | `core/hook/src/main/cpp/native-hook.cpp` | 修改 | 6 处函数体改为薄转发 + 1 行 include；净 **−117 行** |
 | `core/hook/src/main/cpp/CMakeLists.txt` | 修改 | 源列表加 `core/path_spoof.cpp` |
 | `core/hook/src/test/cpp/path_spoof_test.cpp` | 新增 | host 向量测试（自写判定，不依赖 gtest） |
-| `core/hook/src/test/resources/golden/path_spoof_vectors.tsv` | 新增 | **26 条**向量（合成路径 4 / 五类改写 9 / maps 三态 4 / maps 行 5 / 等价族 4） |
+| `core/hook/src/test/resources/golden/path_spoof_vectors.tsv` | 新增 | **27 条**向量（合成路径 4 / 五类改写 10 / maps 三态 4 / maps 行 5 / 等价族 4） |
 | `.github/workflows/module-test.yml` | 修改 | `cpp-core-test` job 增编 + 增跑 `path_spoof_test` |
 | `docs/代码镜像/core/hook/cpp/core/path_spoof.md` | 新增 | 镜像文档四节（职责/函数/偏差登记/约束与坑） |
 
@@ -91,7 +91,7 @@
 
 | 风险 | 对策 / 判据 |
 | --- | --- |
-| 抽取时改了语义 | 逐字搬迁 + `path_spoof_vectors.tsv` **26 条**向量（含 `(deleted)` 后缀、split 名、host_fallback、两条 unchanged） |
+| 抽取时改了语义 | 逐字搬迁 + `path_spoof_vectors.tsv` **27 条**向量（含 `(deleted)` 后缀、split 名、host_fallback、两条 unchanged） |
 | 热路径性能 | 跨 TU 同名转发 ≈1–3 ns/次（相对 `openat` 1–2 µs 可忽略）；函数**未**新增分配/锁/日志；签名逐字保留（含返回 `std::string`） |
 | 漏登记 CMake | 已加 `core/path_spoof.cpp`；`check-jni-contract` 仍绿（24↔29） |
 | 多实例收益被误用 | `guest_pkg` 已是入参，但**当前只有门面在传全局值** —— 参数化是"能改"，不是"已改语义" |
@@ -157,3 +157,32 @@ collect2: error: ld returned 1 exit status
 **修法**：workflow 该行补 `"$CORE/path_pattern.cpp"`；镜像文档「约束与坑」第 5 条同步写明这条依赖。
 
 > 结论：N1a 的 C++ 逻辑本身没有编译错误（`path_spoof.cpp` 编过了），只在链接期暴露了构建清单遗漏。
+
+### CI 第二跑（run `45931083615`）：`path_spoof_test` 25/26
+
+```
+path_rules_test: 16/16 passed
+path_pattern: 21 checks, 0 failures
+[FAIL] rewrite pkg=mark.via
+        input=/data/user/0/com.nextvm.app/files/virtual/apks/mark.via_1.apk (deleted)
+     expected=/data/app/~~VmK8x2==/mark.via-VmK8x2==/base.apk (deleted)
+       actual=/data/app/~~VmK8x2==/mark.via-VmK8x2==/base.apk
+path_spoof_test: 25/26 passed
+```
+
+**分类：编码错误 —— 期望值写的是"意图"，被测代码是"现状"；根因在被测代码的历史缺陷（不是本次重构引入）。**
+
+| 判据 | 结果 |
+| --- | --- |
+| 回退验证 | `path_spoof.cpp` 与原 `native-hook.cpp` 该段**逐字相同**（`git show 6324660` 对照），所以不是 N1a 改了行为 |
+| 根因 | `" (deleted)"` 实际 **10** 字符（空格 + 9），代码写 `size >= 11 && compare(size - 11, 11, " (deleted)")` ⇒ **剥离永不生效** |
+| 后果 | 带 `(deleted)` 的 **guest apk** 路径不以 `.apk` 结尾 ⇒ 落进"含 nextvm"分支 ⇒ `host_fallback=true` ⇒ `transform_maps_line` **丢弃该行**，合成路径也丢后缀 |
+| 是否有意设计 | **不是**。同一文件 `sc_rewrite_fd_target`（seccomp 归因）同样写 11 ⇒ 作者一致地把该后缀当成 11 字符，属**无意错误** |
+| 严重性 | 低：只影响 maps 里"已删除的 apk mmap"行可见性 + seccomp 观测文本，**不影响隔离与读写落点** |
+
+**处置（本批不改行为，规则 18.2：不许把顺手优化藏进重构）**：
+
+1. `path_spoof_vectors.tsv`：该用例的 expected 改为现状（`base.apk`，无后缀）+ `flag=host_fallback`，并加注释写明这是缺陷固定点；
+2. 补一条 `data` 目录的 `(deleted)` 用例（该分支不受影响，rest 自带文本），防止误以为"整类后缀都坏了"；
+3. 镜像文档「偏差登记 #6」+「约束与坑 4」记下：**修它 = 行为变更（R3 类）**，且必须同时改 `sc_rewrite_fd_target`；
+4. 测试**每一步都打印** `[ok] …`（用户 2026-11-27 要求：CI 日志要能看出每条用例固定了什么）。

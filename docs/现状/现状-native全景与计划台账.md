@@ -115,7 +115,7 @@
 | 批 | 内容 | 状态 |
 | --- | --- | --- |
 | **R2-0** | 契约工具 `check-jni-contract.mjs` | ✅ **已落地**（工具存在、当前 24↔29 通过）；总表里写的"23 ↔ 23"已过时 |
-| **R2-1 = N1a** | ① 路径/映射合成 ② 等价族兜底 → `core/path_spoof.{h,cpp}` | ✅ **代码 + 26 条 golden 向量 + host 测试 + 镜像文档已落地**（`20261127-N1a-path-spoof.md`）；**CI 待跑** |
+| **R2-1 = N1a** | ① 路径/映射合成 ② 等价族兜底 → `core/path_spoof.{h,cpp}` | ✅ **代码 + 27 条 golden 向量 + host 测试 + 镜像文档已落地**（`20261127-N1a-path-spoof.md`）；**CI 待跑** |
 | **R2-2 = N1b/N2** | ① maps 行过滤/改写 ② `status`/`stat` 生成 → `core/proc_spoof.{h,cpp}` | ⏳ 未开始 |
 | **R2-3 = N3** | seccomp 归因 → `core/seccomp_attr.{h,cpp}` | ⏳ 未开始 |
 | **R2-4 = N4** | 库过滤判定表 → `core/lib_filter.{h,cpp}` | ⏳ 未开始 |
