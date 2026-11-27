@@ -29,7 +29,7 @@
 | `core/hook/src/main/cpp/native-hook.cpp` | 修改 | 6 处函数体改为薄转发 + 1 行 include；净 **−117 行** |
 | `core/hook/src/main/cpp/CMakeLists.txt` | 修改 | 源列表加 `core/path_spoof.cpp` |
 | `core/hook/src/test/cpp/path_spoof_test.cpp` | 新增 | host 向量测试（自写判定，不依赖 gtest） |
-| `core/hook/src/test/resources/golden/path_spoof_vectors.tsv` | 新增 | **27 条**向量（合成路径 4 / 五类改写 10 / maps 三态 4 / maps 行 5 / 等价族 4） |
+| `core/hook/src/test/resources/golden/path_spoof_vectors.tsv` | 新增 | **33 条**向量（合成路径 4 / 五类改写 13 / maps 可见性 5 / maps 行 7 / 等价族 4） |
 | `.github/workflows/module-test.yml` | 修改 | `cpp-core-test` job 增编 + 增跑 `path_spoof_test` |
 | `docs/代码镜像/core/hook/cpp/core/path_spoof.md` | 新增 | 镜像文档四节（职责/函数/偏差登记/约束与坑） |
 
@@ -91,7 +91,7 @@
 
 | 风险 | 对策 / 判据 |
 | --- | --- |
-| 抽取时改了语义 | 逐字搬迁 + `path_spoof_vectors.tsv` **27 条**向量（含 `(deleted)` 后缀、split 名、host_fallback、两条 unchanged） |
+| 抽取时改了语义 | 逐字搬迁 + `path_spoof_vectors.tsv` **33 条**向量（含 `(deleted)` 后缀、split 名、host_fallback、两条 unchanged）+ 5 条结构不变量 |
 | 热路径性能 | 跨 TU 同名转发 ≈1–3 ns/次（相对 `openat` 1–2 µs 可忽略）；函数**未**新增分配/锁/日志；签名逐字保留（含返回 `std::string`） |
 | 漏登记 CMake | 已加 `core/path_spoof.cpp`；`check-jni-contract` 仍绿（24↔29） |
 | 多实例收益被误用 | `guest_pkg` 已是入参，但**当前只有门面在传全局值** —— 参数化是"能改"，不是"已改语义" |
@@ -186,3 +186,34 @@ path_spoof_test: 25/26 passed
 2. 补一条 `data` 目录的 `(deleted)` 用例（该分支不受影响，rest 自带文本），防止误以为"整类后缀都坏了"；
 3. 镜像文档「偏差登记 #6」+「约束与坑 4」记下：**修它 = 行为变更（R3 类）**，且必须同时改 `sc_rewrite_fd_target`；
 4. 测试**每一步都打印** `[ok] …`（用户 2026-11-27 要求：CI 日志要能看出每条用例固定了什么）。
+
+### 缺陷溯源：**fork 之前（上游自带）**
+
+`(deleted)` 长度用 11 的两处都不是我们写的：
+
+| 位置（当前） | 引入提交 | 作者 / 时间 | 相对 fork 点 `63346e6`（2026-11-18，woand） |
+| --- | --- | --- | --- |
+| `core/path_spoof.cpp:34`（原 `native-hook.cpp` 的 `rewrite_virtual_path`） | `a1871a6` "wip: anti-detection debugging for heavily-packed guests (SecNeo case)" | **woand** / 2026-10-10 07:37 | **祖先 ✓（fork 之前）** |
+| `native-hook.cpp:3943`（`sc_rewrite_fd_target`，seccomp） | `e590c32` "feat: seccomp USER_NOTIF supervision …" | **woand** / 2026-10-10 15:01 | **祖先 ✓（fork 之前）** |
+
+验证方式（可复跑）：
+
+```powershell
+git -C _ref/ShitJumpingVM log --oneline -S 'core.size() - 11' --all -- core/hook/src/main/cpp/native-hook.cpp
+git -C _ref/ShitJumpingVM log --oneline -S 'clen - 11' --all -- core/hook/src/main/cpp/native-hook.cpp
+git -C _ref/ShitJumpingVM blame 63346e6 -L 320,345 -- core/hook/src/main/cpp/native-hook.cpp   # fork 点那一版就已归 woand
+git -C _ref/ShitJumpingVM merge-base --is-ancestor a1871a6 63346e6   # 0 = 是祖先
+```
+
+- fork 后第一个提交是 `2cfd315`（2026-11-22，wentureing）；`git log -S` 在整个 fork 后历史里**只有 N1a 的搬运提交**（`67642d2`）碰过这两行内容 ⇒ **fork 后零次修改**。
+- 数字 11 的来源几乎可以确定是 `sizeof(" (deleted)")`（= 10 字符 + `\0`）而不是 `strlen` ——
+  `tools/analyze/verify-deleted-suffix.mjs` 会把两者都算出来（char=10 / sizeof=11）。
+
+### 完善测试（同一批）
+
+| 项 | 内容 |
+| --- | --- |
+| 向量从 27 → **33 条** | 新增：lib+`(deleted)`（证明 lib 分支不依赖剥离）、maps 里带 `(deleted)` 的 apk 行 → `drop`（缺陷在 maps 层的后果）、`/files/virtual/apks/*.apk` 一律映射到**当前** guest 合成路径、`/data/media/...` 真路径不动、无 `/` 的 `[anon:nextvm]` 行走关键字分支、**空行不得被丢** |
+| **5 条结构不变量** | 合成 apk 必含 guest 包名 / 必不含 `nextvm`；合成 lib 形状 `/lib/arm64/<file>`；`maps_line_visible("")=true`；空路径不改写且不写 `out`；空规则表下 `/data/user/0` 前缀也不得凭空造结果 |
+| **每步输出** | 每条用例与每条不变量都打 `[ok] …`，失败打 `[FAIL]` + expected/actual 四行 |
+| **CI 证据步骤** | `node tools/analyze/verify-deleted-suffix.mjs --root ../container`：把字符数与 `compare(size-N, N, …)` 的成立情况算给 CI 看（信息性；`--strict` 留给修复后防回退） |

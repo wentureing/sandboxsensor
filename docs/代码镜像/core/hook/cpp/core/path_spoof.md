@@ -35,7 +35,7 @@
 | 3 | `/data/user/0/` 判定：`std::strncmp` → `std::string::compare(0, 13, …)` | ✅ 中性 | `compare` 在 `size() < 13` 时比较长度自动截短，与原 `strncmp` 遇 `'\0'` 提前结束的结果一致（都不相等） |
 | 4 | `redirect_path` 的等价族兜底从 `native-hook.cpp` 移入本文件（`redirect_path_with_alias`） | ✅ 中性 | 两段式语义、`空串=未命中` 契约、只兜底一次，均逐字保留；门面仍保留 `path == nullptr \|\| path[0] == '\0'` 的前置检查 |
 | 5 | `rewrite_virtual_path` / `transform_maps_line` 的三分支顺序、`(deleted)` 后缀、`lib/` 判定 | ✅ 无变化 | 逐字搬迁，只把 `g_spoofed_package_name` 换成 `guest_pkg` |
-| 6 | `" (deleted)"` 后缀剥离用 `core.size() >= 11 && core.compare(core.size() - 11, 11, " (deleted)")` | ❌ **历史缺陷（N1a 之前既有，本次逐字保留）** | `" (deleted)"` 实际只有 **10** 个字符（空格 + 9），按 11 比较 ⇒ **剥离永不生效**。后果：带 `(deleted)` 的 **guest apk** 路径不满足 `.apk` 结尾 → 落进"含 nextvm"分支 ⇒ `host_fallback=true`，`transform_maps_line` 因此**丢弃该行**，合成路径也丢后缀。<br>N1a **不改行为**（等价搬迁），golden 用一条 `flag=host_fallback` 的用例固定现状；修它是行为变更（R3 类），且**必须同时**改 `native-hook.cpp` 的 `sc_rewrite_fd_target`（seccomp 归因里同样写 11）。影响面：只影响 maps 里"已删除的 apk mmap"行可见性与 seccomp 观测文本，不影响隔离 |
+| 6 | `" (deleted)"` 后缀剥离用 `core.size() >= 11 && core.compare(core.size() - 11, 11, " (deleted)")` | ❌ **历史缺陷（上游 `a1871a6` / woand / 2026-10-10，fork 点 `63346e6` 之前既有；本次逐字保留）** | `" (deleted)"` 实际只有 **10** 个字符（空格 + 9），代码按 **11** 比较（很可能把 `sizeof(" (deleted)")`=11 当成了长度）⇒ **剥离永不生效**。后果：带 `(deleted)` 的 **guest apk** 路径不满足 `.apk` 结尾 → 落进"含 nextvm"分支 ⇒ `host_fallback=true`，`transform_maps_line` 因此**丢弃该行**，合成路径也丢后缀。<br>N1a **不改行为**（等价搬迁），golden 用一条 `flag=host_fallback` 的用例固定现状；修它是行为变更（R3 类），且**必须同时**改 `native-hook.cpp` 的 `sc_rewrite_fd_target`（上游 `e590c32` 同样写 11）。影响面：只影响 maps 里"已删除的 apk mmap"行可见性与 seccomp 观测文本，不影响隔离。<br>**证据（可复跑）**：`node tools/analyze/verify-deleted-suffix.mjs` 会算出 char=10 / sizeof=11，并对两处源码逐行判定"不成立" |
 
 ## 约束与坑
 

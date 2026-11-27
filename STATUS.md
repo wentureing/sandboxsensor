@@ -69,7 +69,7 @@
 | # | 问题 | 现状 / 下一步 |
 | --- | --- | --- |
 | **1** | **B4-4 剩余 f′/g/g′/h** | a–f 已完成（VAM 1 633 行）。下一步 **B4-4f′**：`attachBaseContext` 编排 + `disableCheckJniForGuest`（叶子已搬成 object → 零注入）。见 `docs/计划/计划-重构阶段任务总表.md` R1 |
-| **2** | **native 重构第一轮（N1a）** | ✅ **已落地**：`core/path_spoof.{h,cpp}`（6 个纯函数、`guest_pkg` 参数化）+ 27 条 golden 向量 + host 测试；`native-hook.cpp` 8003 → **7886 行**。CI 待跑，见 `docs/输出/变更/20261127-N1a-path-spoof.md`。下一步 **N1b**（`proc_spoof` 拆"读 + 转"） |
+| **2** | **native 重构第一轮（N1a）** | ✅ **已落地**：`core/path_spoof.{h,cpp}`（6 个纯函数、`guest_pkg` 参数化）+ 33 条 golden 向量 + host 测试；`native-hook.cpp` 8003 → **7886 行**。CI 待跑，见 `docs/输出/变更/20261127-N1a-path-spoof.md`。下一步 **N1b**（`proc_spoof` 拆"读 + 转"） |
 | 3 | L2 两实例共用 slot | 属多实例缺口（M4）；用户已同意顺序但**暂缓**，见 `计划-多实例支持缺口清单.md` |
 | 4 | L3 legacy 回退崩溃可诊断 | `bin.mt.plus` 崩溃；先补"framework bind FAILED 完整栈 + 明确原因" |
 | 5 | L4/L5/L6 两条路径不一致 | provider 成功率 / `mInitialApplication` / legacy 三段 patch；**行为变更，逐条走变更流程** |

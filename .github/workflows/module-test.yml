@@ -70,6 +70,15 @@ jobs:
           persist-credentials: false
           fetch-depth: 1
 
+      - name: Checkout sensor repo (analysis scripts)
+        uses: actions/checkout@v4
+        with:
+          repository: wentureing/sandboxsensor
+          ref: main
+          path: sensor
+          persist-credentials: false
+          fetch-depth: 1
+
       - name: Compile pure C++ core (host)
         working-directory: container
         run: |
@@ -96,6 +105,12 @@ jobs:
           /tmp/path_rules_test core/hook/src/test/resources/golden/path_vectors.tsv
           /tmp/path_pattern_test
           /tmp/path_spoof_test core/hook/src/test/resources/golden/path_spoof_vectors.tsv
+
+      - name: Verify "(deleted)" suffix length (evidence, not assertion)
+        working-directory: sensor
+        # 信息性步骤：把" (deleted)" 到底是几个字符、源码里 compare(size - N, N, …) 能否成立
+        # 算给 CI 看。缺陷未修时仍绿（--strict 才会红，留给修复后防回退用）。
+        run: node tools/analyze/verify-deleted-suffix.mjs --root ../container
 
   # 仅编译 :app（Gradle 会自动带上全部 :feature:*）—— 2026-11-27 新增，用户允许。
   # 动机：feature/app 层的 Kotlin 类型错误只有编译器能查，而 matrix 只编 :core:*，
