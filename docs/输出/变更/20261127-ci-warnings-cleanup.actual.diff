@@ -1,0 +1,48 @@
+diff --git a/core/hook/src/test/cpp/path_pattern_test.cpp b/core/hook/src/test/cpp/path_pattern_test.cpp
+index 15dfb80..9d5f950 100644
+--- a/core/hook/src/test/cpp/path_pattern_test.cpp
++++ b/core/hook/src/test/cpp/path_pattern_test.cpp
+@@ -19,7 +19,7 @@ static void expect(bool cond, const char* what) {
+     }
+ }
+ 
+-static void expect_eq(const std::string& got, const std::string& want, const char* what) {
++[[maybe_unused]] static void expect_eq(const std::string& got, const std::string& want, const char* what) {
+     ++g_checks;
+     if (got != want) {
+         std::printf("FAIL  %s  got=%s want=%s\n", what, got.c_str(), want.c_str());
+diff --git a/core/hook/src/test/cpp/path_rules_test.cpp b/core/hook/src/test/cpp/path_rules_test.cpp
+index 1634b26..ca0faab 100644
+--- a/core/hook/src/test/cpp/path_rules_test.cpp
++++ b/core/hook/src/test/cpp/path_rules_test.cpp
+@@ -85,7 +85,7 @@ std::vector<std::string> splitTabs(const std::string& line) {
+     return out;
+ }
+ 
+-std::vector<std::string> splitSpaces(const std::string& line) {
++[[maybe_unused]] std::vector<std::string> splitSpaces(const std::string& line) {
+     std::vector<std::string> out;
+     std::istringstream ss(line);
+     std::string tok;
+diff --git a/core/services/src/main/java/com/nextvm/core/services/component/VirtualContentProviderManager.kt b/core/services/src/main/java/com/nextvm/core/services/component/VirtualContentProviderManager.kt
+index db0f1e9..5d82b30 100644
+--- a/core/services/src/main/java/com/nextvm/core/services/component/VirtualContentProviderManager.kt
++++ b/core/services/src/main/java/com/nextvm/core/services/component/VirtualContentProviderManager.kt
+@@ -385,9 +385,6 @@ class VirtualContentProviderManager @Inject constructor() {
+         // Same package always allowed
+         if (record.packageName == callingPackage) return true
+ 
+-        // Exported providers with no read permission are accessible
+-        if (record.exported && record.readPermission == null) return true
+-
+         // TODO: Check against VirtualPermissionManager
+         return record.exported
+     }
+@@ -400,7 +397,6 @@ class VirtualContentProviderManager @Inject constructor() {
+ 
+         if (record.writePermission == null) return true
+         if (record.packageName == callingPackage) return true
+-        if (record.exported && record.writePermission == null) return true
+ 
+         return record.exported
+     }

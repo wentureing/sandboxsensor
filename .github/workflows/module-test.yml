@@ -416,7 +416,9 @@ jobs:
 
       # 诊断序列模板（DiagnosticsSequenceOutputTest 写到 build/diagnostics/）
       - name: Show diagnostics sequence
-        if: always() && matrix.module == ':core:common'
+        # 与 Compile/Run 同一条件：显式指定 modules 且不含 :core:common 时本 job 本就不跑测试，
+        # 此时不该报"没有 checks-template.txt"（否则是守卫误报）。
+        if: always() && matrix.module == ':core:common' && (inputs.modules == '' || contains(inputs.modules, matrix.module))
         working-directory: container
         run: |
           if [ -f core/common/build/diagnostics/checks-template.txt ]; then
