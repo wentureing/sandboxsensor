@@ -1,6 +1,6 @@
 # 项目状态（STATUS）
 
-> 最后更新：**2026-11-26（容器 `0798d4b` / 设备包 `1.0.0-db5ba0b` vc125；B4-4 a–e 完成，VAM 4589 → 1795）**
+> 最后更新：**2026-11-27**（容器 `6324660`；设备包 `1.0.0-4f0e9d7`；探针 100 项）
 > 本文件只回答「当前状态」。文档怎么找见 `docs/README.md`；
 > **历史事实/边界**见 `docs/输出/记录/记录-STATUS20261125-归档.md`；
 > **被推翻的结论**见 `docs/archive/错误结论-2026-11/`（引用任何结论前先对照一遍）。
@@ -9,52 +9,55 @@
 
 ## 0. 一句话现状
 
-容器可跑 Via 与探针；启动链已从 4 589 行拆到 **1 795 行**，并有 **8 份 golden × C1–C12** 兜底；
-**WebView 的 `file://` MIME 问题仍在**（Via 主页显示源码，两条 bind 路径表现相同）——
-与"豁免=零欺骗"冲突，出路仍是 hook `loadUrl` 或内置 WebView（未做）。
+容器可跑 via 与探针；**process slot 的观测 / 会话复用 / 按 task 清理已落地并真机验证**；
+启动链拆到 **1 633 行**（原 4 589），有 **8 份 golden × C1–C12** 兜底；
+**native 已建立"关键过程插桩 + 基线"**（干净安装实测：`libs=415 patched=411 skipped_self=1 skipped_system=3`）；
+**WebView `file://` MIME 仍未解决**（独立立项）。
 
-## 0.1 2026-11-26 本轮成果
+## 0.1 2026-11-27 本轮成果
 
 | 项 | 结果 | 证据 |
 | --- | --- | --- |
-| 启动链 golden | 采集脚本重写为 **STOP + LAUNCH**；**8 份样本**（2 guest × 2 次 × framework/legacy 两条路径），归一化后每组**逐行一致** | `docs/架构/架构-启动链契约.md`、`tools/device/capture-breadcrumb-golden.ps1` |
-| 契约测试 | `BreadcrumbGoldenContractTest` **C1–C12**（顺序 / 计数 / provider 失败降级 / 豁免分支 / 两条路径 / 两次一致） | 同上 |
-| **B4-4 a–e 拆分** | `VirtualApplicationManager` **4 589 → 1 795 行（−61%）**；`lifecycle/startup/` **8 个新文件**；`diag/dump/GuestStackDumps`、`diag/trace/HijackTrace` | 6 份变更文档 + 13 份镜像文档 |
-| 两条路径考古 | legacy（上游 2026-03 初版）→ framework（上游 2026-10 `40d5f88` B2）的由来、并存原因、**三处实质差异** | `docs/架构/架构-两条bind路径的由来.md` |
-| 缺陷登记 | **10 条（L1–L10）**：stub 泄漏 / slot 共用 / legacy 崩溃 / provider 不一致 / mInitialApplication / patch 缺失 / 早期窗口 / 探针窗口 / datadir 中性 / WebView | `docs/计划/计划-启动链已知缺陷（重构后修复）.md` |
-| 干净安装实测 | `1.0.0-db5ba0b` vc125：**SELF_CHECK ok=8 fail=0**、探针 `entries=98 fail=2(J26,J27)`、via `bind complete (framework path)` + `onActivityResumed` | `tools/device/clean-install-and-test.ps1` |
-| CI 改进 | `module-test` 加**编译前置 step** + 失败写 job summary；`check-imports` 能抓**嵌套类 import 写法**（本轮 CI 红的真实原因） | `.github/workflows/module-test.yml`、`tools/lint/check-imports.mjs` |
-| 流程约定 | AGENTS.md 新增「**等待约定**」（容器 10s / guest 只看 golden / 判定只读文件）与「**规则 19 脚本途径**」（多步逻辑用 Node） | `AGENTS.md` |
+| **process slot 会话复用 + 清理**（Step 0a–3） | 点 guest 复用原进程（pid 不变）；STOP 归还 stub（池可循环）；STALE 自动回收；按 **task** 逐个关闭（不杀进程）；`launchApp(forceNewSession)` 开新窗口 | `docs/输出/变更/20261127-process-slots-会话复用与UI解绑.md` |
+| 设置页 / 列表 | 计数 = 真实占用 slot 数（含 ORPHAN）；列表按 slot 一行、可展开 task；`Bring to front` 成败落 `checks.log` | 同上 §3.3 |
+| 两个真 bug 修复 | ① `candidatesFor` 未过滤已占用 stub → "New instance" 永远拿 `Standard00`、折叠回同一 task；② 进程名改写误伤主进程 | `c0394e8` / `4b01d3d` |
+| **B4-4f 拆分** | `GuestLoadedApkPathInjection` + `PackerAttachFixes` 搬出；VAM 1 795 → **1 633 行**；2/3 函数等价 ✓、1 个判据抽取已登记 | `c91155e`、两份镜像文档 |
+| **native 插桩 + 基线** | GOT patch / 延迟 patch / `/proc` spoof 计数 + 第 24 个 JNI 导出 `nativeGetHookStats`；三阶段采样（bind/+5s/+20s） | `docs/现状/现状-native-关键过程基线.md` |
+| 探针 N16 | `libc open/read /proc/self/maps`（与 N10 的 `fopen` 对照，覆盖 native spoof 计数）；项集合 golden → **100 项** | `2e7e675`、`docs/输出/探针-检测项清单.md` |
+| CI 工具 | `compile-app` job（只编 `:app`+`:feature:*`）；`check-imports` 第 3 类（import 路径错）+ 跨模块；`check-jni-contract`（24 external ↔ C++ 导出） | `.github/workflows/module-test.yml`、`tools/lint/` |
+| 文档 | 进程名/包名身份模型、slot/租约术语、native 技术路线、重构阶段总表、多实例缺口、native N1a 计划、诊断通道记录 | 见 §4 |
 
 | 项 | 状态 |
 | --- | --- |
-| `VirtualApplicationManager` | **1 795 行**（原 4 589，−61%） |
-| 测试 | `core:virtualization` **119 条**（本轮新增 G1–G4 / H1–H4 / S1–S3 + 契约扩到 8 样本） |
-| 探针 | 98 项；`round` 实测 `ok 53 / fail 2(J26,J27) / skipped 43` |
-| 构建 | `abiFilters=arm64-v8a`；`module-test` 模块级 matrix + 编译前置 |
-| 设备包 | `1.0.0-db5ba0b`（vc125）**干净安装通过** |
+| `VirtualApplicationManager` | **1 633 行**（原 4 589，−64%） |
+| `native-hook.cpp` | **7 935 行**（143 顶层函数；23→24 个 JNI 导出） |
+| 测试 | `core:virtualization` 原 119 条 + 本轮 **S14–S19 / L8–L9 / R1–R8 / U1–U5 / P1–P9 / I1 / R4**（以 CI 报告为准） |
+| 探针 | **100 项**（新增 N16）；`suite=all` 实测 `fail=2(J26,J27)` |
+| 设备包 | `1.0.0-4f0e9d7`（`clean-install-and-test.ps1` 通过） |
 
 > 口径：`versionName` / asset 名用**主仓库** `GITHUB_SHA`，**不代表容器代码版本**；
-> 容器代码看 CI 日志 `ref=` 与 `git log -1`（当前 `0798d4b`）。
+> 容器代码看 `git -C _ref/ShitJumpingVM log -1`（当前 `6324660`）。
 
 ---
 
 ## 1. 能力状态
 
 **唯一权威表**：`docs/现状/README.md`「能力生效状态」+ `docs/现状/容器能力清单与回归方法.md`（14 项）
-+ `docs/现状/容器自测覆盖矩阵.md`（A–F 手段 × 21 功能面）+ `docs/现状/现状-启动链测试覆盖与可测试性.md`。
++ `docs/现状/容器自测覆盖矩阵.md` + `docs/现状/现状-启动链测试覆盖与可测试性.md` + `docs/现状/现状-native-关键过程基线.md`。
 
 | 能力 | 状态 |
 | --- | --- |
 | Binder 代理 / `VirtualContext` 路径改写 / native GOT patch | ✅ |
 | guest 路径重定向规则（v142 起） | ✅ |
 | Java 层 I/O 重定向（默认 `debug.nextvm.javaIo=0`） | ✅ 开关可切 |
-| 路径欺骗豁免（via 零欺骗、仍隔离） | ✅ 已装包验证 |
+| 路径欺骗豁免（via 零欺骗、仍隔离） | ✅ |
 | 合成路径「族根」翻译（ROOT_FORM，Java+C++） | ✅ |
-| 容器自检（8 项 × 主+guest 双进程） / 诊断通道 | ✅ |
+| **process slot 观测 / 会话复用 / 按 task 清理** | ✅ 真机验证（pid 不变、`released stubs slot=0 killed=1/1`） |
+| 容器自检（8 项 × 双进程）/ 诊断通道 | ✅ |
 | 实例停止（STOP，真杀进程） | ✅ |
-| **guest 启动链顺序断言（C1–C12 × 8 样本）** | ✅ 本轮新增 |
-| **干净安装一键冒烟**（安装→授权→导入→三连判定） | ✅ 本轮新增 |
+| 启动链顺序断言（C1–C12 × 8 样本） | ✅ |
+| 干净安装一键冒烟 | ✅ |
+| **native 关键过程插桩 + 基线** | ✅（`[Dbg/native]` 三阶段；`spoof=0` 有解释） |
 | WebView `file://` MIME | ❌ |
 | 跨进程文件选择器 / NIO / 多实例 / 反检测接线 | ❌ / ⏸ |
 
@@ -64,16 +67,16 @@
 
 | # | 问题 | 现状 / 下一步 |
 | --- | --- | --- |
-| **1** | **B4-4 剩余批次 f/g/h** | **a–e 已完成**。下一步 **B4-4f**：legacy attach 链（`attachBaseContext` + `injectGuestPathsIntoLoadedApk` + `disableCheckJniForGuest`）+ 壳/运行时修正（`patchJiaguStubBeforeAttach` + `installRuntimeLoadCallerFix`）→ g（framework bind + 取证）→ h（编排）。边界见 `docs/计划/计划-B4-4剩余批次边界.md` |
-| **2** | **L1 stub 泄漏（最影响操作）** | 每 slot 只够 **5 次**启动，超了 `LAUNCH_ACTIVITY` 报 `No available stub`，必须重启容器。登记为 L1，**重构后第一步修** |
-| 3 | L2 两实例共用 `processSlot` | `LIST` 可见 via 与 probe 同为 `slot=1`；与 L1 叠加更早失败。重构后修 |
-| 4 | L3 legacy 回退路径加固 guest 崩溃 | `bin.mt.plus` `NoClassDefFoundError: l.۠᩹ܽ` @ `createApplication`；framework 侧在 `makeApplication` 里同样炸（壳 so `UnsatisfiedLinkError`）。重构后修 |
-| 5 | L4/L5/L6 两条路径不一致 | provider 成功率、`mInitialApplication`、legacy 三段 patch 框架侧缺失。**拆分时不许顺手对齐**（那是行为变更） |
-| 6 | WebView MIME | 已知（F1–F13 归档）；两条路（hook `loadUrl` / 内置 WebView）均未做；**两条 bind 路径同样表现**（本轮实测） |
-| 7 | `J19/J20` 早期窗口 | 容器启动 10s 内 `getApplicationInfo(自己)` 会 `NameNotFound`；根治见 `架构-就绪依赖与早期窗口.md` §三 |
-| 8 | 探针 `P25/P26` | 窗口 token / `UiProbe` 未就绪 → 现表现为 `skipped`（不是 fail）；属探针取样时机 |
-| 9 | 探针 `J26/J27` fail = **设计故意** | 探针用字面量宿主路径检测"写穿"；`javaIo` 默认 `0` → Java 层不翻译 → `ENOENT`。判读跳过 |
-| 10 | `ProbeRunner` 剩余拆分（R1） | 不紧急；项集合契约已建立（99 项，`check-probe-ids.mjs`） |
+| **1** | **B4-4 剩余 f′/g/g′/h** | a–f 已完成（VAM 1 633 行）。下一步 **B4-4f′**：`attachBaseContext` 编排 + `disableCheckJniForGuest`（叶子已搬成 object → 零注入）。见 `docs/计划/计划-重构阶段任务总表.md` R1 |
+| **2** | **native 重构第一轮（N1a）** | 计划已就绪：抽 `path_spoof`（`synthetic_*` + `rewrite_virtual_path` + `maps_line_visible` + `transform_maps_line`，**包名参数化**）。见 `docs/计划/计划-native-N1a-path-spoof.md` |
+| 3 | L2 两实例共用 slot | 属多实例缺口（M4）；用户已同意顺序但**暂缓**，见 `计划-多实例支持缺口清单.md` |
+| 4 | L3 legacy 回退崩溃可诊断 | `bin.mt.plus` 崩溃；先补"framework bind FAILED 完整栈 + 明确原因" |
+| 5 | L4/L5/L6 两条路径不一致 | provider 成功率 / `mInitialApplication` / legacy 三段 patch；**行为变更，逐条走变更流程** |
+| 6 | WebView MIME | 未解决（两种出路均未做） |
+| 7 | L11 `Standard00` 与 guest 内部固定名重叠 | 已登记；修法候选：`getStubForApp` 改 `Standard04` 或按活跃 task 避让 |
+| 8 | `J19/J20` 早期窗口 | 容器启动 10s 内 `getApplicationInfo(自己)` `NameNotFound`；见 `架构-就绪依赖与早期窗口.md` |
+| 9 | 探针 `J26/J27` fail = 设计故意 | `javaIo=0` → Java 层不翻译 → `ENOENT`；判读跳过 |
+| 10 | 探针 `N16` 刚加 | 待探针产物验证：`N16.libc_maps` 与 `spoof/maps_lines` 应同时非 0 |
 
 ---
 
@@ -83,9 +86,10 @@
 | --- | --- |
 | 测试设备 | `10AFA8169Z0039G`（vivo V2463A / Android 15 / arm64-v8a） |
 | 设备时钟 | 比 PC 快约 2 分钟；日志按**设备时间**切片 |
-| **干净安装后的日志** | **logcat 拿不到该 uid 的 I 级日志**（`logcat --pid=<容器>` 全空）→ 判定只读 `run-as` 下的文件 |
-| 容器 | `1.0.0-<7位sha>`（`versionCode = GITHUB_RUN_NUMBER`）；设备当前 `1.0.0-db5ba0b` vc125 |
-| appops | 干净安装清 `MANAGE_EXTERNAL_STORAGE` → 装后必须重授（脚本已自动做） |
+| **干净安装后的日志** | logcat 拿不到该 uid 的 I 级日志 → 判定只读 `run-as` 下的文件 |
+| 容器 | `1.0.0-<7位sha>`；设备当前 `1.0.0-4f0e9d7` |
+| 探针 | 100 项（`suite=all`） |
+| appops | 干净安装清 `MANAGE_EXTERNAL_STORAGE` → 装后必须重授（脚本已做） |
 | 签名 | 固定 keystore（`apksigner` SHA-256 校验） |
 | 工具链 | Gradle 8.9 / NDK 27.1.12297006 / CMake 3.22.1 |
 
@@ -98,29 +102,30 @@ node tools/release/gh-api.mjs --dispatch module-test.yml main ref="baseline-v150
   modules=":core:virtualization" test_filter="com.nextvm.core.virtualization.*"
 ```
 
-- `push` 不触发任何编译；一次只 dispatch 一个编译；
-- `module-test`：**编译前置 step**（`compileDebugKotlin`）红了就别指望有测试报告；失败时 job summary 里有根因行；
+- `push` 不触发编译；**一次只 dispatch 一个**（同 workflow 不许两个 run）；
+- `module-test` 的 `compile-app` job 只编 `:app`（带上全部 `:feature:*`），防 app/feature 层编译错误漏到 container-build；
 - 假绿守卫：每个 matrix job 校验 `tests>0`。
 
 ---
 
-## 4. 文档导航
+## 4. 文档导航（本轮新增已标注）
 
 | 想了解 | 去哪 |
 | --- | --- |
 | 文档总索引 / 写作约定 | `docs/README.md` |
-| 系统怎么运作 | `docs/架构/README.md`；本轮新增 **`架构-启动链契约.md`**、**`架构-两条bind路径的由来.md`** |
-| 为什么这么设计 | `docs/设计/README.md` |
-| 现在什么生效 / 自测能测什么 | `docs/现状/README.md`、`现状-容器能力清单与回归方法.md`、`现状-容器自测覆盖矩阵.md`、`现状-启动链测试覆盖与可测试性.md` |
-| 做什么、什么顺序 | `docs/计划/README.md`；本轮新增 **`计划-B4-4剩余批次边界.md`**、**`计划-启动链已知缺陷（重构后修复）.md`** |
-| 证据 / 变更 / 调研 / 记录 | `docs/输出/README.md`（本轮 6 份变更 + `调研-启动链这类模块的自动化测试方式.md`） |
+| **系统怎么运作** | `docs/架构/README.md`；**新增** `架构-native模块关系与技术路线.md`、`架构-进程名与包名身份模型.md`、`架构-slot租约与进程术语.md`；旧有 `架构-启动链契约.md`、`架构-两条bind路径的由来.md` |
+| **为什么这么设计** | `docs/设计/README.md`；**新增** `设计-native重构与临时适配器.md`（含性能评估/选型）、`设计-process-slot测试分层与matrix.md` |
+| **现在什么生效** | `docs/现状/README.md`、`现状-容器能力清单与回归方法.md`、**新增 `现状-native-关键过程基线.md`**、`现状-容器自测覆盖矩阵.md` |
+| **接下来做什么** | `docs/计划/README.md`；**新增** `计划-重构阶段任务总表.md`（R1–R4 + DoD）、`计划-native-N1a-path-spoof.md`、`计划-多实例支持缺口清单.md`；旧有 `计划-B4-4剩余批次边界.md`、`计划-启动链已知缺陷（重构后修复）.md` |
+| **做过什么/证据** | `docs/输出/变更/20261127-process-slots-会话复用与UI解绑.md`、`docs/输出/记录/记录-诊断通道与零代码调试手段.md`、`docs/输出/探针-检测项清单.md` |
 | 哪些结论是错的 | `docs/archive/错误结论-2026-11/README.md` |
 
 ---
 
 ## 5. 排查第一站
 
-> guest 行为异常但没崩溃/没栈 → 先看 `GuestBreadcrumb`（tag `BootCrumb`，文件 `<沙箱>/files/breadcrumb-<pid>.log`）；
-> 再判是否"早期窗口"（`docs/架构/架构-就绪依赖与早期窗口.md`）；最后才看探针 P/N/W 系列与 native 栈。
->
-> **干净安装后不要用 logcat 判定** —— 换 uid 后 vivo 吞 I 级日志，读 `files/checks.log` / `debug-trace.log`。
+1. guest 行为异常但没崩溃/没栈 → `GuestBreadcrumb`（`<沙箱>/files/breadcrumb-<pid>.log`，tag `BootCrumb`）；
+2. 判是否"早期窗口"（`docs/架构/架构-就绪依赖与早期窗口.md`）；
+3. **native 相关** → `docs/现状/现状-native-关键过程基线.md` + `files/debug-trace.log` 的 `[Dbg/native]`；
+4. 最后才看探针 P/N/W 系列与 native 栈。
+5. **干净安装后不要用 logcat 判定** —— 读 `files/checks.log` / `files/debug-trace.log`。

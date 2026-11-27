@@ -30,6 +30,8 @@
 | **合成路径的「族根」翻译** | ✅ **已修（`11f23d5` / `031eba8`）** | ROOT_FORM 匹配语义：以 `/` 结尾的规则同时拥有"去尾斜杠的根形态"，Java 与 C++ 同改；T39/T41/T42/T43 全绿（CI `45579005086`）。规则集合未变 |
 | **Java 层文件 I/O 重定向（v141）** | ⚠️ **已实现但默认关闭** | `RegisterNatives` 替换 `libcore.io.Linux.open/access` 能装上（W38 曾通过），但会让 Via **完全不能交互**（用户对照确认）。根因是异常语义与 AOSP 不一致，详见 `../输出/记录/记录-JavaIoHook导致Via不可交互.md`。开关：`debug.nextvm.javaIo`（默认 0） |
 | `/proc/self` spoof、进程名、seccomp | ✅ 生效 | `ensureGuestApplicationBooted`（guest） |
+| **native 关键过程插桩 + 基线** | ✅ 生效（`1.0.0-4f0e9d7` 实测） | `[Dbg/native]` 三阶段（bind/+5s/+20s）；`libs=415 patched=411 skipped_self=1 skipped_system=3`；`skipped_self/system` 为回归判据。见 `现状-native-关键过程基线.md`、`../架构/架构-native模块关系与技术路线.md` |
+| **native 重构（N1a `path_spoof`）** | ⏳ 计划就绪 | 抽 `synthetic_*` / `rewrite_virtual_path` / `maps_line_visible` / `transform_maps_line`（包名参数化），见 `../计划/计划-native-N1a-path-spoof.md` |
 | `WebViewWarmup`（provider 预热/修复） | ✅ 生效 | guest bind complete 时调度 |
 | v138 进程 Application → guest | ✅ 生效 | 探针 W32：`currentApplication()` 的 class 是 `ProbeApplication` |
 | **WebView `file://` 的 MIME** | ❌ **未解决** | 沙箱 `.html` → `text/plain`（Via 主页显示源码） |

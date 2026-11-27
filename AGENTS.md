@@ -822,25 +822,88 @@ node tools/lint/kotlin-lint.mjs <改动目录>                     # 括号/KDoc
 
 ---
 
-## 交接要点（2026-11-26 深夜，B4-4 a–e 完成后）
+## 规则 21：native 改动的口径（2026-11-27 用户允许"临时适配器保契约"）
 
-1. **设备包**：`1.0.0-db5ba0b`（versionCode 125），容器代码 `0798d4b`
-   （含 B4-4a…4e 拆分 + 嵌套类 import 修复）。**干净安装已实测通过**（见 2）。
-2. **一条命令跑完冒烟**：
+> 设计：`docs/设计/设计-native重构与临时适配器.md`；技术路线：`docs/架构/架构-native模块关系与技术路线.md`；
+> **每批对照基线**：`docs/现状/现状-native-关键过程基线.md`
+
+### 允许的
+
+- 只搬 **A/B/C 三类纯逻辑**（路径合成 / `/proc` 内容生成 / seccomp 归因）→ `core/*.{h,cpp}`，host g++ 可测；
+- **E 类 hook 入口（`hooked_open/stat/…`）与 F 类 JNI/`JNI_OnLoad` 永不搬**；
+- 临时适配器只允许：**A 同名转发**（门面 = `return core::impl(...)`）、**B `extern "C"` 兼容符号**；
+  **C（宏/内联切换）不许进 release**；每加一个记「适配器台账」（文件:符号 / 形式 / 为什么 / 何时删 / 怎么验证）。
+
+### 硬红线
+
+| # | 红线 | 原因 |
+| --- | --- | --- |
+| 1 | 不新增堆分配 / 锁 / 热路径日志 / 异常 | 热路径是每次 I/O；微基准增幅必须 **< 5%** |
+| 2 | 不改 JNI 名/签名、`.so` 名、`NS_*` 语义 | Kotlin `external fun` 契约冻结 |
+| 3 | 新 `.cpp` 必须进 `CMakeLists.txt` | 漏登记 = `undefined symbol`（已踩） |
+| 4 | 每批对照基线：`skipped_self=1`、`skipped_system=3` **不许变**；`libs/patched` 只记量级 | 过滤规则回归 |
+| 5 | 测试走 host g++ + golden 向量（`cpp-core-test`） | **不引** instrumentation / 桌面 JVM 加载 `.so` |
+
+### 提交前
+
+```powershell
+node tools/lint/check-jni-contract.mjs   # Kotlin external ↔ C++ 导出（24↔24）
+# + cpp-core-test（CI matrix 分支）
+```
+
+---
+
+## 规则 22：身份/命名表述 + 「一步步」工作法（2026-11-27）
+
+### 三层身份（改名前先读 `docs/架构/架构-进程名与包名身份模型.md`）
+
+| 层 | 进程名 | 包名 | 约束 |
+| --- | --- | --- | --- |
+| 系统面（AMS/PMS/AppOps） | `com.nextvm.app:pN` | 宿主 | **不能改**（改了会被 AppOps `checkPackage` 拒） |
+| 容器管理面（VAMS 记录/日志/调试） | 允许 `mark.via:p0`（`$pkg:p$slot`） | — | 不得泄漏到 guest 可见 API |
+| **guest 可见面** | **纯包名 `mark.via`** | guest 包名 | SDK 用 `processName == packageName` 判主进程，带后缀会被当子进程 |
+
+**顺序契约**：`VirtualCallerResolver.cacheProcessSlotFromCurrentName()` 必须早于 `setArgV0`（改名不可逆）。
+
+### 表述规范（**不造符号**）
+
+- 一律 `key=value`：`guest=… instance=… slot=… pid=… task=… tasks=… state=…`（与 `CmdReceiver LIST`、breadcrumb 一致）；
+- **不引入 `@` / `#`** 这类标识；`pN` 只是 `:pN` 的既有简称（见 `docs/架构/架构-slot租约与进程术语.md`）；
+- 术语：guest 包 / instance（`pkg_<ts>`）/ slot（0–9）/ process（一槽一个）/ lease（占槽凭证，非会话清单）/ session=task。
+
+### 「一步步」工作法（用户 2026-11-27 明确）
+
+- **从轻到重分批；每步行为符合设计即可提交**，不夹带下一步；每步四件套：代码 / 单测 / 镜像文档 / 真机判据；
+- 门禁顺序：T0 静态 → T1 等价或微基准 → T2/T3 一次 `module-test` → T4 真机 5 项；
+- **不为割而割**（四问）：割完能测什么 / 能改什么 / 契约是否简单 / 风险是否可控；答不出就不割；
+- 插桩三阶段（bind / +5s / +20s）；`spoof=0` 先问"**谁在读**"（native 读者 vs Java 流），再判是否插桩缺口。
+
+### 探针新增项流程
+
+1. `native_probe.cpp` / `ProbeRunner` 加 `add(...)` / `put(...)`；
+2. `node tools/lint/check-probe-ids.mjs --write`（项集合 golden，当前 **100 项**）；
+3. 更新 `docs/输出/探针-检测项清单.md`；
+4. **一次** `probe-build.yml` dispatch。
+
+---
+
+## 交接要点（2026-11-27 深夜，process slot + B4-4f + native 插桩后）
+
+1. **版本**：设备包 `1.0.0-4f0e9d7`；容器代码 `6324660`（含 process slot Step0–3、B4-4f、native 插桩 + 运行期采样）；
+   探针已加 `N16.libc_maps`（100 项），产物待验证。
+2. **一条命令冒烟**：
    ```powershell
-   node tools/release/gh-api.mjs --asset container-shitjumpingvm-db5ba0b.apk dist\c.apk
+   node tools/release/gh-api.mjs --asset container-shitjumpingvm-4f0e9d7.apk dist\c.apk
    .\tools\device\clean-install-and-test.ps1 -Apk dist\c.apk
    ```
-   判据：`SELF_CHECK ok=8 fail=0` / 探针 `entries=98 fail=2`（J26/J27 设计故意）/ via `bind complete` + `onActivityResumed`。
-   脚本已按「等待约定」改造：容器等 10s、每步 1 次 adb 调用、判定只读文件、不截图。
-3. **等待与判定**：见上文「等待约定」一节。**容器 10s；guest 只看 golden 要素；判定不用 logcat**。
+   判据：`SELF_CHECK ok=8 fail=0` / 探针 `100 项 fail=2(J26,J27)` / via `bind complete` + `onActivityResumed`；
+   另抓 `run-as … grep 'Dbg/native' files/debug-trace.log` → 应有 bind/+5s/+20s 三行。
+3. **等待与判定**：容器 10s；guest 只看 golden 要素；**判定只读文件**（不用 logcat）。
 4. **改容器后本地必过**（毫秒级）：
-   `kotlin-lint` / `check-imports`（**含嵌套类 import 检查**）/ `check-duplicate-imports` /
-   `check-diag-channels` / `check-probe-ids` / `gen-diag-channels --check` / `gen-breadcrumb-golden --check`。
-5. **主线进度**：B4-4 已完成 **a（Application 创建/Provider 初始化）、b（onCreate/ApplicationInfo）、
-   c（ActivityThread 补丁/后台任务）、d（栈转储/壳追踪）、e（诊断装配/LoadedApk 补丁）**；
-   `VirtualApplicationManager` **4 589 → 1 795 行（−61%）**。
-   剩余批次与边界见 `docs/计划/计划-B4-4剩余批次边界.md`（**B4-4f** legacy attach 链 + 壳/运行时修正 → g → h）。
-6. **已知缺陷（重构后修）**：10 条登记在 `docs/计划/计划-启动链已知缺陷（重构后修复）.md`。
-   最影响操作的两条：**L1 stub 每 slot 只够 5 次启动**（超了要重启容器）、**L2 两实例共用 `slot=1`**。
+   `kotlin-lint` / `check-imports`（跨模块）/ `check-duplicate-imports` / `check-diag-channels` /
+   `check-probe-ids` / **`check-jni-contract`（改 native 时）** / `gen-*--check`。
+5. **主线**：B4-4 已完成 **a–f**（VAM **1 633 行**）；下一步 **B4-4f′**（attach 编排 + CheckJNI）或
+   **native N1a**（`path_spoof`，计划已就绪）。总表见 `docs/计划/计划-重构阶段任务总表.md`（R1–R4 + DoD）。
+6. **已知缺陷**：L1 已修（`stopApp` 归还 stub）；L2/L11 已登记；L3–L6 待修（行为变更，逐条走变更流程）；
+   多实例 M1–M8 **暂缓**（用户已同意顺序）。
 7. **触发编译仍是一次一个、手动 dispatch**；`push` 不触发编译（改 workflow / 文档可以随便 push）。
