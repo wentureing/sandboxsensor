@@ -136,6 +136,23 @@ git -C _ref/ShitJumpingVM revert <N2-A commit>
 
 （改完补 `git diff --stat` 与 `20261127-N2a-lib-filter.actual.diff`）
 
+## 八之二、A 批真机验证（2026-11-27，设备 `10AFA8169Z0039G`）
+
+装机方式：`adb install -r`（**覆盖安装**，保留沙箱数据与 appops，不动两个既有 guest 实例）。
+APK：`container-shitjumpingvm-323ec41.apk`（22291118 B，versionCode 137，`versionName=1.0.0-323ec41`）。
+
+| 判据 | 实测 | 结论 |
+| --- | --- | --- |
+| 版本 / appops | `1.0.0-323ec41`，`MANAGE_EXTERNAL_STORAGE: allow` | 覆盖安装未丢授权 |
+| 容器就绪 | 10s 后私有目录可读；实例 `mark.via_…` / `com.sandbox.probe_…` 都在 | 数据未清 |
+| `SELF_CHECK` | `ok=8 fail=0 S1..S8 全 ok` | 自检通过 |
+| via 启动 | `bind complete (framework path)`，到 `onActivityResumed` | 启动链正常 |
+| **`hook stats`（关键）** | 三拍全同：`libs=415 patched=411 skipped_self=1 skipped_system=3 late_passes=0 late_libs=0 spoof=0 maps_lines=0 maps_hidden=0` | **与基线逐字段一致 ⇒ N2-A 等价重构得证** |
+| 探针 `suite=all` | `entries=106 {ok=93, fail=13}`，与重构前**完全相同**（fail 仍是 `P25/P26` + N 系列首轮早期窗口） | native 路径 hook 无退化 |
+
+> 说明：A 的产物仍只有 9 个 key（N2-B 的 3 个新字段不在这个 APK 里）；B 的容器编译单独跑一次。
+> 因为 `skipped_self/system` 与 `patched` 一字未变，`现状-native-关键过程基线.md` 的判据表**无需改动**。
+
 ## 九、下一批（B，等 A 绿）
 
 | 项 | 内容 |
