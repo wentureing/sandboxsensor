@@ -12,7 +12,7 @@
 | 项 | 实测值 | 说明 |
 | --- | --- | --- |
 | `native-hook.cpp` | **7886 行** | N1a 搬出 117 行（改前 8003）；更早文档写的 7935 是 `fb4afc0` 插桩前口径 |
-| `core/` 下已有纯逻辑 | `path_rules.{h,cpp}`(27/43)、`path_pattern.{h,cpp}`(33/52)、**`path_spoof.{h,cpp}`(38/132)**、`diag_channels.inc`(31) | `proc_spoof.*` / `seccomp_attr.*` / `lib_filter.*` **都不存在** → N2/N3/N4 未开始；**N1a 已落地** |
+| `core/` 下已有纯逻辑 | `path_rules.{h,cpp}`(27/43)、`path_pattern.{h,cpp}`(33/52)、`path_spoof.{h,cpp}`(49/140)、**`lib_filter.{h,cpp}`(33/54)**、`diag_channels.inc`(31) | `proc_spoof.*` / `seccomp_attr.*` **不存在** → N1b/N3 未开始；**N1a 与 N2-A 已落地** |
 | `CMakeLists.txt` 源列表 | `native-hook.cpp` + `core/path_rules.cpp` + `core/path_pattern.cpp` | 新 `.cpp` 必须登记，否则 `undefined symbol` |
 | 编译选项 | `-O2`、`-fno-exceptions`、`-fno-rtti`、visibility `hidden`、`-Wl,-z,max-page-size=16384`；**无 LTO** | 决定适配器开销（跨 TU ≈1–3 ns/次） |
 | `JNIEXPORT` 函数 | **29 个** | 其中 **24 个**与 Kotlin `external fun` 一一对应，另 5 个是旧符号（`nativeGetRecent`/`nativeClearRecent`/`nativeGetStats`/`nativeResetStats`/`nativeInstall`） |
@@ -118,7 +118,7 @@
 | **R2-1 = N1a** | ① 路径/映射合成 ② 等价族兜底 → `core/path_spoof.{h,cpp}` | ✅ **已落地**：代码 + 33 条向量 + 5 条不变量 + 镜像文档（`20261127-N1a-path-spoof.md`）；CI 侧修了两轮（链接缺 `path_pattern.cpp`、`(deleted)` 期望值），见该文 §八 |
 | **R2-2 = N1b/N2** | ① maps 行过滤/改写 ② `status`/`stat` 生成 → `core/proc_spoof.{h,cpp}` | ⏳ 未开始 |
 | **R2-3 = N3** | seccomp 归因 → `core/seccomp_attr.{h,cpp}` | ⏳ 未开始 |
-| **R2-4 = N4** | 库过滤判定表 → `core/lib_filter.{h,cpp}` | ⏳ 未开始 |
+| **R2-4 = N4** | 库过滤判定表 → `core/lib_filter.{h,cpp}` | 🟡 **N2-A 已落地**（判据表 + 20 向量 + 4 不变量，计数/日志不变）；N2-B（新增计数 + 过滤前移）待 A 绿后单独做 |
 
 同一篇总表的 **D2 目标**：`native-hook.cpp` **≤ 5 200 行**（N1a 后 7886 → 还差 2 686 行，A/B/C 三类纯逻辑约 1 500–2 000 行可下沉）。
 
