@@ -40,8 +40,8 @@ sys/* 一堆 + memfd/prctl/setjmp/ucontext ← 运行时行为
 | 函数（当前 `static`） | 可抽 | 需要参数化 |
 | --- | --- | --- |
 | `trim_trailing_slashes` | ✅ 纯 | — |
-| `redirect_path` | ✅ 纯 | `g_path_redirects` → 参数 `const RuleTable&` |
-| `is_path_hidden` | ✅ 纯 | `g_hidden_paths` → 参数 |
+| `redirect_path` | ✅ 纯 | `g_path_redirects` → 参数 `const RuleTable&`（**已抽**；`native-hook.cpp` 只剩等价族兜底，N1a 一并搬走） |
+| `is_path_hidden` | ✅ 纯 | `g_hidden_paths` → 参数（**已抽**，`native-hook.cpp` 只剩薄壳，不必再抽） |
 | `is_proc_self_path` | ✅ 纯 | — |
 | `maps_line_visible` | ✅ 纯 | 隐藏关键字表可保留为常量 |
 | `synthetic_apk_path` / `synthetic_lib_path` | ✅ 纯 | `g_spoofed_package_name` → 参数 |

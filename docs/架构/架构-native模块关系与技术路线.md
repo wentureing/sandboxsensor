@@ -1,7 +1,7 @@
 # 架构：native 模块的关系与技术路线（2026-11-27 研究）
 
 - 回答：`core/hook/src/main/cpp` 现在**怎么工作**、模块之间怎么连、关键过程在哪几个点、插桩怎么插。
-- 实测基线：`native-hook.cpp` **7935 行**（`read` 口径；`Measure-Object -Line` 统计 7471 是少算末行，以 7935 为准）。
+- 实测基线：`native-hook.cpp` **8003 行**（`read` 口径，2026-11-27 复测；插桩 `fb4afc0` 后的数字，之前的 7 935 已过期）。
 - 关联：`设计-native重构与临时适配器.md`、`架构-hook实现现状-代码为准.md`、`架构-C++测试夹具设计.md`
 
 ---
@@ -32,7 +32,7 @@
 ## 二、模块关系（调用链）
 
 ```
-Kotlin NativeHookBridge ──JNI(23 导出)──► native-hook.cpp
+Kotlin NativeHookBridge ──JNI(24 导出)──► native-hook.cpp
    ▲                                        │
    │                                        ├─ nextvm::path::*（core/path_rules）
    │                                        ├─ nextvm::diag::is_container_diag_path（core/diag_channels.inc）
@@ -49,7 +49,8 @@ Kotlin NativeHookBridge ──JNI(23 导出)──► native-hook.cpp
 **当前诊断已被消费的三条线**：
 1. `nativeGetFsStats()` → `JavaIoHooks.stats()` → `DebugTrace.event("javaIo", "stats after bind: …")`（`bindApplication` 里两处）；
 2. `nativeGetFsRecent()` → 同上（"recent opens after bind"）；
-3. `seccomp-diag.log`、`checks.log`、`debug-trace.log` 由探针/人读。
+3. `nativeGetHookStats()` → `DebugTrace.event("native", "hook stats: …")`（bind + `+5s` + `+20s` 三拍，见 §3.3）；
+4. `seccomp-diag.log`、`checks.log`、`debug-trace.log` 由探针/人读。
 
 ---
 
@@ -62,31 +63,40 @@ Kotlin NativeHookBridge ──JNI(23 导出)──► native-hook.cpp
 
 ### 3.2 插桩点（4 个，全部低频）
 
-| # | 点 | 计数内容 | 触发频率 |
+| # | 点 | 计数内容（**实际实现的字段**） | 触发频率 |
 | --- | --- | --- | --- |
-| **H1** | `install_hooks_callback` 累计（每个库一次） | `libs_scanned` / `libs_patched` / `libs_skipped`（原因计数：self/system/no-plt/not-elf）/ `slots_patched` | 初始化 + 每次延迟 patch |
-| **H2** | `patch_newly_loaded_libraries` | `late_passes` / `late_libs_added` / `late_slots_added` | 每次新库加载 |
-| **H3** | `/proc` spoof（`build_spoofed_maps` 等） | `spoof_calls[5 种 kind]` / `maps_lines_total` / `maps_lines_hidden` / `maps_lines_rewritten` / `real_mode_calls` | 每次读 `/proc/self/*`（低频） |
-| **H4** | JNI 取回 | `nativeGetHookStats()` → 一行 `key=value` 字符串 | 由 `bindApplication` 调用一次/绑定 |
+| **H1** | `install_hooks_callback`（每个库一次） | `libs_scanned` / `libs_patched` / `libs_skipped_self` / `libs_skipped_system` | 初始化 + 每次延迟 patch |
+| **H2** | `patch_newly_loaded_libraries` | `late_passes` / `late_libs_added` | 每次新库加载 |
+| **H3** | `/proc` spoof（`build_spoofed_maps` / `make_proc_spoof_fd`） | `spoof`（生成伪造 fd 的总次数，**不分 kind**）/ `maps_lines` / `maps_hidden` | 每次读 `/proc/self/*`（低频） |
+| **H4** | JNI 取回 | `nativeGetHookStats()` → 一行 `key=value`（第 **24** 个导出） | bind 一次 + `+5s` / `+20s` 各一次 |
+
+> 未实现的候选字段（`slots_patched` / `skipped_noplt` / `spoof_calls[5 种 kind]` / `maps_lines_rewritten` / `real_mode_calls`）
+> 属**将来需要时再加**：当前 9 个字段已够判回归（见 `现状-native-关键过程基线.md` §三 的判据表）。
 
 ### 3.3 输出格式（可比较的基线）
 
 ```
-hook: libs=41 patched=40 skipped_self=1 skipped_system=0 skipped_noplt=0 slots=187
-late: passes=3 libs=2 slots=9
-proc: cmdline=1 maps=2 comm=1 status=1 stat=1 lines=820 hidden=0 rewritten=5 real=0
+[Dbg/native] hook stats: libs=415 patched=411 skipped_self=1 skipped_system=3 late_passes=0 late_libs=0 spoof=0 maps_lines=0 maps_hidden=0
+[Dbg/native] hook stats(+5s):  …同格式…
+[Dbg/native] hook stats(+20s): …同格式…
 ```
 
+- 三拍的来源：`bind` 时由 `VirtualApplicationManager` 的两条 bind 路径各打一次；
+  `+5s`/`+20s` 由 `GuestDiagnosticsRegistration` 的 daemon 线程 `nv-native-stats` 打
+  （`spoof`/`maps_*` 只在 bind **之后**才可能非 0 —— guest 真去读 `/proc/self/maps` 时）；
 - 落点：`files/debug-trace.log` 的 `[Dbg/native] …` 行（规则 20：重要过程必须落盘）；
 - 取法：`run-as com.nextvm.app grep -a 'Dbg/native' files/debug-trace.log`；
-- 固定方式：一次真机基线 → `docs/现状/现状-native-关键过程基线.md`（字段与量级），后续每批对比（`libs/slots` 允许随版本漂移，`skipped_*` 与 `hidden/real` 是语义判据）。
+- 固定方式：一次真机基线 → `docs/现状/现状-native-关键过程基线.md`（字段与量级），后续每批对比
+  （`libs/patched` 允许随版本漂移；`skipped_self=1`、`skipped_system=3` 是**语义判据**）。
 
 ### 3.4 契约影响
 
-新增 1 个 JNI 导出（23 → **24**）→ 必须：
-1. Kotlin `NativeHookBridge` 加 `external fun nativeGetHookStats(): String` + 包装 `hookStats()`；
-2. `tools/lint/check-jni-contract.mjs`（R2-0）校验 24 ↔ 24；
-3. 不改 `.so` 名、不改已有 23 个签名。
+第 24 个导出 `nativeGetHookStats` **已落地**：
+
+1. Kotlin `NativeHookBridge.nativeGetHookStats(): String` + 包装 `hookStats()`（异常返回 `n/a`）；
+2. `tools/lint/check-jni-contract.mjs` 校验：Kotlin `external`=**24** / C++ `JNIEXPORT`=**29**
+   （多出的 5 个是旧符号 `nativeInstall`/`nativeGetStats`/`nativeResetStats`/`nativeGetRecent`/`nativeClearRecent`，工具只提示不报错）；
+3. `.so` 名与已有 23 个签名均未改。
 
 ### 3.5 明确不动
 
