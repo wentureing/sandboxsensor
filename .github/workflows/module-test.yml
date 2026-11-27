@@ -83,6 +83,10 @@ jobs:
           g++ -std=c++17 -Wall -Wextra -Werror=return-type -O1 -I "$CORE" \
             "$CORE/path_pattern.cpp" "$TEST/path_pattern_test.cpp" \
             -o /tmp/path_pattern_test
+          # N1a：路径伪装纯逻辑（依赖 path_rules 的规则匹配）
+          g++ -std=c++17 -Wall -Wextra -Werror=return-type -O1 -I "$CORE" \
+            "$CORE/path_rules.cpp" "$CORE/path_spoof.cpp" "$TEST/path_spoof_test.cpp" \
+            -o /tmp/path_spoof_test
 
       - name: Run golden vectors (shared with Kotlin) + pattern vectors
         working-directory: container
@@ -90,6 +94,7 @@ jobs:
           set -euo pipefail
           /tmp/path_rules_test core/hook/src/test/resources/golden/path_vectors.tsv
           /tmp/path_pattern_test
+          /tmp/path_spoof_test core/hook/src/test/resources/golden/path_spoof_vectors.tsv
 
   # 仅编译 :app（Gradle 会自动带上全部 :feature:*）—— 2026-11-27 新增，用户允许。
   # 动机：feature/app 层的 Kotlin 类型错误只有编译器能查，而 matrix 只编 :core:*，

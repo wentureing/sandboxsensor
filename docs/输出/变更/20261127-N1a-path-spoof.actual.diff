@@ -1,0 +1,550 @@
+diff --git a/core/hook/src/main/cpp/CMakeLists.txt b/core/hook/src/main/cpp/CMakeLists.txt
+index 164ec44..bbd2b9f 100644
+--- a/core/hook/src/main/cpp/CMakeLists.txt
++++ b/core/hook/src/main/cpp/CMakeLists.txt
+@@ -13,6 +13,7 @@ add_library(nextvm-native SHARED
+     native-hook.cpp
+     core/path_rules.cpp
+     core/path_pattern.cpp
++    core/path_spoof.cpp
+ )
+ 
+ # Link against Android log + dynamic linker
+diff --git a/core/hook/src/main/cpp/core/path_spoof.cpp b/core/hook/src/main/cpp/core/path_spoof.cpp
+new file mode 100644
+index 0000000..4bb49dd
+--- /dev/null
++++ b/core/hook/src/main/cpp/core/path_spoof.cpp
+@@ -0,0 +1,132 @@
++// 路径伪装纯逻辑实现（从 native-hook.cpp 逐字搬出，包名参数化）。
++// 说明见 docs/代码镜像/core/hook/cpp/core/path_spoof.md
++#include "path_spoof.h"
++
++#include <cstring>
++
++namespace nextvm {
++namespace spoof {
++
++namespace {
++
++// 合成路径里固定的安装 token：只要求"看起来像正常安装"，不要求唯一。
++constexpr const char* kInstallToken = "VmK8x2==";
++
++}  // namespace
++
++std::string synthetic_apk_path(const std::string& guest_pkg) {
++    return "/data/app/~~" + std::string(kInstallToken) + "/" + guest_pkg + "-" +
++           kInstallToken + "/base.apk";
++}
++
++std::string synthetic_lib_path(const std::string& guest_pkg,
++                               const std::string& file_name) {
++    return "/data/app/~~" + std::string(kInstallToken) + "/" + guest_pkg + "-" +
++           kInstallToken + "/lib/arm64/" + file_name;
++}
++
++bool rewrite_virtual_path(const std::string& guest_pkg, const std::string& path,
++                          std::string& out, bool* host_fallback) {
++    if (host_fallback != nullptr) *host_fallback = false;
++    std::string core = path;
++    std::string suffix;
++    if (core.size() >= 11 &&
++        core.compare(core.size() - 11, 11, " (deleted)") == 0) {
++        core.erase(core.size() - 11);
++        suffix = " (deleted)";
++    }
++
++    // Guest APK 文件：base + split（虚拟存储里 split 名为
++    // "<instanceId>_split_config.<...>.apk"，stock 形态是 base.apk 旁边的纯 split 名）。
++    if (core.find("/files/virtual/apks/") != std::string::npos &&
++        core.size() >= 4 && core.compare(core.size() - 4, 4, ".apk") == 0) {
++        std::string fname = core.substr(core.find_last_of('/') + 1);
++        size_t split_pos = fname.find("split_");
++        if (fname.find("_split_") != std::string::npos &&
++            split_pos != std::string::npos) {
++            out = "/data/app/~~" + std::string(kInstallToken) + "/" + guest_pkg +
++                  "-" + kInstallToken + "/" + fname.substr(split_pos) + suffix;
++        } else {
++            out = synthetic_apk_path(guest_pkg) + suffix;
++        }
++        return true;
++    }
++
++    // Guest 数据树：抽出的 lib 走合成 lib 目录，其余镜像到 /data/data/<pkg>/。
++    const std::string data_marker = "/files/virtual/data/";
++    size_t data_pos = core.find(data_marker);
++    if (data_pos != std::string::npos) {
++        size_t inst_end = core.find('/', data_pos + data_marker.size());
++        if (inst_end != std::string::npos) {
++            std::string rest = core.substr(inst_end + 1);
++            if (rest.compare(0, 4, "lib/") == 0) {
++                out = synthetic_lib_path(
++                          guest_pkg, rest.substr(rest.find_last_of('/') + 1)) +
++                      suffix;
++            } else {
++                out = "/data/data/" + guest_pkg + "/" + rest + suffix;
++            }
++            return true;
++        }
++    }
++
++    // 其余提到容器/hook 引擎自身的路径：没有 guest 等价物。
++    if (core.find("nextvm") != std::string::npos) {
++        if (host_fallback != nullptr) *host_fallback = true;
++        out = synthetic_apk_path(guest_pkg) + suffix;
++        return true;
++    }
++    return false;
++}
++
++bool maps_line_visible(const char* line) {
++    static const char* kHiddenKeywords[] = {
++        "nextvm", "lsplant", "dobby", "bhook", "xhook", "substrate", "xposed"
++    };
++    for (const char* kw : kHiddenKeywords) {
++        if (strstr(line, kw) != nullptr) return false;
++    }
++    return true;
++}
++
++bool transform_maps_line(const std::string& guest_pkg, const char* line,
++                         std::string& out) {
++    const char* slash = strchr(line, '/');
++    if (slash != nullptr) {
++        std::string prefix(line, static_cast<size_t>(slash - line));
++        std::string core(slash);
++        while (!core.empty() && (core.back() == '\n' || core.back() == '\r')) {
++            core.pop_back();
++        }
++
++        std::string rewritten;
++        bool host_fallback = false;
++        if (rewrite_virtual_path(guest_pkg, core, rewritten, &host_fallback)) {
++            // 容器/引擎自己的映射在 stock 进程里不存在 —— 丢弃。
++            if (host_fallback) return false;
++            out = prefix + rewritten + "\n";
++            return true;
++        }
++    }
++
++    // hook 框架关键字（含 [anon:...] 映射名）—— 丢弃。
++    if (!maps_line_visible(line)) return false;
++
++    out = line;
++    return true;
++}
++
++std::string redirect_path_with_alias(const path::RuleTable& rules,
++                                     const std::string& path) {
++    std::string redirected = path::redirect_path(rules, path);
++    if (!redirected.empty()) return redirected;
++
++    // 等价族兜底：/data/user/0/ 与 /data/data/ 指向同一目录。
++    if (path.compare(0, 13, "/data/user/0/") == 0) {
++        return path::redirect_path(rules, "/data/data/" + path.substr(13));
++    }
++    return "";
++}
++
++}  // namespace spoof
++}  // namespace nextvm
+diff --git a/core/hook/src/main/cpp/core/path_spoof.h b/core/hook/src/main/cpp/core/path_spoof.h
+new file mode 100644
+index 0000000..40635a4
+--- /dev/null
++++ b/core/hook/src/main/cpp/core/path_spoof.h
+@@ -0,0 +1,38 @@
++// 路径伪装纯逻辑（无 Android / JNI 依赖）—— 供 native-hook.cpp 与 host 单测共用。
++//
++// 红线：不得 include <jni.h>、<android/*>、<link.h>、<sys/*>。
++// 说明见 docs/代码镜像/core/hook/cpp/core/path_spoof.md
++#pragma once
++
++#include <string>
++
++#include "path_rules.h"
++
++namespace nextvm {
++namespace spoof {
++
++/** 合成"正常安装"的 base.apk 路径。 */
++std::string synthetic_apk_path(const std::string& guest_pkg);
++
++/** 合成"正常安装"的 lib/arm64/<file_name> 路径。 */
++std::string synthetic_lib_path(const std::string& guest_pkg,
++                               const std::string& file_name);
++
++/** 把 betray 虚拟布局的路径改写成 stock 等价物；false = 无需改写。
++ *  host_fallback=true 表示这是容器/引擎自己的路径，没有 guest 等价物。 */
++bool rewrite_virtual_path(const std::string& guest_pkg, const std::string& path,
++                          std::string& out, bool* host_fallback = nullptr);
++
++/** maps 行是否可见（命中 hook 框架关键字则丢弃）。 */
++bool maps_line_visible(const char* line);
++
++/** 一行 maps 的三态：改写 / 原样 / 丢弃（返回 false）。 */
++bool transform_maps_line(const std::string& guest_pkg, const char* line,
++                         std::string& out);
++
++/** 规则重定向 + /data/user/0 ↔ /data/data 等价族兜底；空串 = 未命中。 */
++std::string redirect_path_with_alias(const path::RuleTable& rules,
++                                     const std::string& path);
++
++}  // namespace spoof
++}  // namespace nextvm
+diff --git a/core/hook/src/main/cpp/native-hook.cpp b/core/hook/src/main/cpp/native-hook.cpp
+index dcfd0b2..46edd5b 100644
+--- a/core/hook/src/main/cpp/native-hook.cpp
++++ b/core/hook/src/main/cpp/native-hook.cpp
+@@ -26,6 +26,8 @@
+ 
+ // 纯逻辑（无 Android/JNI 依赖）：可被 host 侧 g++ 单测编译，见 docs/架构/架构-C++测试夹具设计.md
+ #include "core/path_rules.h"
++// 路径伪装纯逻辑（N1a 搬出）；本文件只保留绑定全局状态的薄转发
++#include "core/path_spoof.h"
+ // 诊断白名单（由 core/common/src/main/resources/diag_channels.tsv 生成，勿手改）
+ #include "core/diag_channels.inc"
+ #include <android/log.h>
+@@ -253,18 +255,8 @@ static bool is_path_hidden(const char* path) {
+  */
+ static std::string redirect_path(const char* path) {
+     if (path == nullptr || path[0] == '\0') return "";
+-
+-    std::string redirected = nextvm::path::redirect_path(g_path_redirects, std::string(path));
+-    if (!redirected.empty()) return redirected;
+-
+-    // 等价族兜底：/data/user/0/ 与 /data/data/ 指向同一目录。
+-    // 生产规则两侧都注册（setupAppRedirections），这里只防"只注册一条"的将来情况。
+-    if (std::strncmp(path, "/data/user/0/", 13) == 0) {
+-        std::string alt_path = std::string("/data/data/") + (path + 13);
+-        return nextvm::path::redirect_path(g_path_redirects, alt_path);
+-    }
+-
+-    return "";
++    // 规则匹配 + 等价族兜底都在 core/path_spoof.cpp（N1a 搬出）。
++    return nextvm::spoof::redirect_path_with_alias(g_path_redirects, std::string(path));
+ }
+ 
+ /**
+@@ -288,136 +280,27 @@ enum ProcSpoofKind {
+     PROC_SPOOF_STAT
+ };
+ 
+-// Keywords that betray the virtual environment in /proc/self/maps.
+-// Shared by the fopen() and open()/openat() spoof paths.
++// 以下 5 个函数已搬到 core/path_spoof.cpp（N1a）。门面只绑全局状态（guest 包名）。
+ static bool maps_line_visible(const char* line) {
+-    static const char* kHiddenKeywords[] = {
+-        "nextvm", "lsplant", "dobby", "bhook", "xhook", "substrate", "xposed"
+-    };
+-    for (const char* kw : kHiddenKeywords) {
+-        if (strstr(line, kw) != nullptr) return false;
+-    }
+-    return true;
++    return nextvm::spoof::maps_line_visible(line);
+ }
+ 
+-// Synthetic "normal install" locations used to rewrite the guest's own
+-// mappings in /proc/self/maps. A stock device shows the guest APK under
+-// /data/app/~~<rand>==/<pkg>-<rand>==/base.apk with its extracted libs in
+-// the sibling lib/arm64 directory — mirror that shape (constant tokens
+-// are fine; what matters is that the paths stop betraying the virtual
+-// layout and stop containing the host's package name).
+ static std::string synthetic_apk_path() {
+-    return "/data/app/~~VmK8x2==/" + g_spoofed_package_name + "-VmK8x2==/base.apk";
++    return nextvm::spoof::synthetic_apk_path(g_spoofed_package_name);
+ }
+ 
+ static std::string synthetic_lib_path(const std::string& file_name) {
+-    return "/data/app/~~VmK8x2==/" + g_spoofed_package_name +
+-           "-VmK8x2==/lib/arm64/" + file_name;
++    return nextvm::spoof::synthetic_lib_path(g_spoofed_package_name, file_name);
+ }
+ 
+-/**
+- * Rewrite a filesystem path that betrays the virtual layout into its
+- * stock-install equivalent. Shared by the maps transform and by the
+- * readlink result rewriting (fd symlink targets). Returns false when
+- * the path needs no rewrite. When the path belongs to the host/engine
+- * itself (no guest-side equivalent exists), *host_fallback is set and
+- * `out` receives the synthetic APK path as a plausible stand-in —
+- * callers that present listings (maps) should drop such entries
+- * instead, callers that must return a path (readlink) use the stand-in.
+- */
+ static bool rewrite_virtual_path(const std::string& path, std::string& out,
+                                  bool* host_fallback = nullptr) {
+-    if (host_fallback != nullptr) *host_fallback = false;
+-    std::string core = path;
+-    std::string suffix;
+-    if (core.size() >= 11 &&
+-        core.compare(core.size() - 11, 11, " (deleted)") == 0) {
+-        core.erase(core.size() - 11);
+-        suffix = " (deleted)";
+-    }
+-
+-    // Guest APK files: base + split APKs (virtual storage names splits
+-    // "<instanceId>_split_config.<...>.apk"; stock form is the plain
+-    // split file name next to base.apk).
+-    if (core.find("/files/virtual/apks/") != std::string::npos &&
+-        core.size() >= 4 && core.compare(core.size() - 4, 4, ".apk") == 0) {
+-        std::string fname = core.substr(core.find_last_of('/') + 1);
+-        size_t split_pos = fname.find("split_");
+-        if (fname.find("_split_") != std::string::npos &&
+-            split_pos != std::string::npos) {
+-            out = "/data/app/~~VmK8x2==/" + g_spoofed_package_name +
+-                  "-VmK8x2==/" + fname.substr(split_pos) + suffix;
+-        } else {
+-            out = synthetic_apk_path() + suffix;
+-        }
+-        return true;
+-    }
+-
+-    // Guest data tree: extracted libs go to the synthetic lib dir,
+-    // everything else mirrors under /data/data/<pkg>/.
+-    const std::string data_marker = "/files/virtual/data/";
+-    size_t data_pos = core.find(data_marker);
+-    if (data_pos != std::string::npos) {
+-        size_t inst_end = core.find('/', data_pos + data_marker.size());
+-        if (inst_end != std::string::npos) {
+-            std::string rest = core.substr(inst_end + 1);
+-            if (rest.compare(0, 4, "lib/") == 0) {
+-                out = synthetic_lib_path(
+-                    rest.substr(rest.find_last_of('/') + 1)) + suffix;
+-            } else {
+-                out = "/data/data/" + g_spoofed_package_name + "/" + rest +
+-                      suffix;
+-            }
+-            return true;
+-        }
+-    }
+-
+-    // Anything else naming the host app is the engine/host itself.
+-    if (core.find("nextvm") != std::string::npos) {
+-        if (host_fallback != nullptr) *host_fallback = true;
+-        out = synthetic_apk_path() + suffix;
+-        return true;
+-    }
+-    return false;
++    return nextvm::spoof::rewrite_virtual_path(g_spoofed_package_name, path, out,
++                                               host_fallback);
+ }
+ 
+-/**
+- * Transform one /proc/self/maps line for the spoofed view.
+- * Returns false if the line must be dropped; otherwise fills `out`.
+- *
+- * v1 of this spoof simply dropped every line mentioning the host —
+- * including the guest's OWN apk/lib mappings (they live under the
+- * host's data dir), so a shell locating itself or its APK in maps
+- * found nothing at all. v2 rewrites the guest's own paths to a
+- * plausible stock-install layout and only drops lines that belong to
+- * the host app / hook engine itself.
+- */
+ static bool transform_maps_line(const char* line, std::string& out) {
+-    const char* slash = strchr(line, '/');
+-    if (slash != nullptr) {
+-        std::string prefix(line, static_cast<size_t>(slash - line));
+-        std::string core(slash);
+-        while (!core.empty() && (core.back() == '\n' || core.back() == '\r')) {
+-            core.pop_back();
+-        }
+-
+-        std::string rewritten;
+-        bool host_fallback = false;
+-        if (rewrite_virtual_path(core, rewritten, &host_fallback)) {
+-            // Host/engine mappings have no guest-side equivalent; a
+-            // stock process simply has no such lines — drop them.
+-            if (host_fallback) return false;
+-            out = prefix + rewritten + "\n";
+-            return true;
+-        }
+-    }
+-
+-    // Hook-framework keywords anywhere in the line (also covers
+-    // [anon:...] mapping names) — drop.
+-    if (!maps_line_visible(line)) return false;
+-
+-    out = line;
+-    return true;
++    return nextvm::spoof::transform_maps_line(g_spoofed_package_name, line, out);
+ }
+ 
+ static std::string build_spoofed_maps() {
+diff --git a/core/hook/src/test/cpp/path_spoof_test.cpp b/core/hook/src/test/cpp/path_spoof_test.cpp
+new file mode 100644
+index 0000000..3cc947f
+--- /dev/null
++++ b/core/hook/src/test/cpp/path_spoof_test.cpp
+@@ -0,0 +1,136 @@
++// host 侧向量测试：直接编译 core/path_spoof.cpp（+ core/path_rules.cpp），不需要 Android SDK/NDK。
++//
++// 同一份 golden/path_spoof_vectors.tsv 同时约束：合成路径形状、五类虚拟路径改写、
++// maps 行三态、/data/user/0 ↔ /data/data 等价族兜底。不依赖 gtest（CI 离线，自写判定）。
++//
++// 用法：path_spoof_test <path_spoof_vectors.tsv>
++#include <cstdio>
++#include <fstream>
++#include <iostream>
++#include <string>
++#include <vector>
++
++#include "path_rules.h"
++#include "path_spoof.h"
++
++namespace {
++
++const std::string kSandbox = "/sandbox/i1";
++
++// 只注册 /data/data/<pkg>/ 与 /sdcard/：故意**不**注册 /data/user/0/<pkg>/，
++// 这样 redirect_alias 的等价族兜底才会被真的走到。
++nextvm::path::RuleTable makeRules() {
++    nextvm::path::RuleTable rules;
++    rules["/data/data/mark.via/"] = kSandbox + "/";
++    rules["/sdcard/"] = kSandbox + "/sdcard/";
++    return rules;
++}
++
++std::vector<std::string> splitTabs(const std::string& line) {
++    std::vector<std::string> out;
++    std::string cur;
++    for (char c : line) {
++        if (c == '\t') {
++            out.push_back(cur);
++            cur.clear();
++        } else {
++            cur.push_back(c);
++        }
++    }
++    out.push_back(cur);
++    return out;
++}
++
++std::string stripTrailingNewline(std::string s) {
++    while (!s.empty() && (s.back() == '\n' || s.back() == '\r')) s.pop_back();
++    return s;
++}
++
++}  // namespace
++
++int main(int argc, char** argv) {
++    if (argc < 2) {
++        std::cerr << "usage: path_spoof_test <path_spoof_vectors.tsv>\n";
++        return 2;
++    }
++    std::ifstream in(argv[1]);
++    if (!in) {
++        std::cerr << "cannot open " << argv[1] << "\n";
++        return 2;
++    }
++
++    const nextvm::path::RuleTable rules = makeRules();
++    int total = 0;
++    int failed = 0;
++    std::string line;
++    while (std::getline(in, line)) {
++        if (line.empty() || line[0] == '#') continue;
++        const std::vector<std::string> cols = splitTabs(line);
++        if (cols.size() < 4) continue;
++
++        const std::string& op = cols[0];
++        const std::string& pkg = cols[1];
++        const std::string& input = cols[2];
++        const std::string& expected = cols[3];
++        const std::string flag = cols.size() > 4 ? cols[4] : "";
++
++        ++total;
++        std::string actual;
++        std::string why;
++
++        if (op == "synthetic_apk") {
++            actual = nextvm::spoof::synthetic_apk_path(pkg);
++        } else if (op == "synthetic_lib") {
++            actual = nextvm::spoof::synthetic_lib_path(pkg, input);
++        } else if (op == "rewrite") {
++            std::string out;
++            bool host_fallback = false;
++            const bool rewritten =
++                nextvm::spoof::rewrite_virtual_path(pkg, input, out, &host_fallback);
++            if (expected == "unchanged") {
++                actual = rewritten ? out : "unchanged";
++                if (rewritten) why = "期望不改写，实际改写了";
++            } else if (!rewritten) {
++                actual = "unchanged";
++                why = "期望改写，实际未命中";
++            } else {
++                actual = out;
++                if (flag == "host_fallback" && !host_fallback) {
++                    why = "期望 host_fallback=true，实际 false";
++                }
++            }
++        } else if (op == "hidden") {
++            actual = nextvm::spoof::maps_line_visible(input.c_str()) ? "keep" : "drop";
++        } else if (op == "transform") {
++            std::string out;
++            const bool kept = nextvm::spoof::transform_maps_line(pkg, input.c_str(), out);
++            if (!kept) {
++                actual = "drop";
++            } else if (expected == "keep") {
++                actual = stripTrailingNewline(out) == input ? "keep" : stripTrailingNewline(out);
++            } else {
++                actual = stripTrailingNewline(out);
++            }
++        } else if (op == "redirect_alias") {
++            const std::string r = nextvm::spoof::redirect_path_with_alias(rules, input);
++            actual = r.empty() ? "unchanged" : r;
++        } else {
++            --total;
++            std::cerr << "[SKIP] unknown op=" << op << "\n";
++            continue;
++        }
++
++        if (actual != expected) {
++            ++failed;
++            std::cerr << "[FAIL] " << op << " pkg=" << pkg << "\n"
++                      << "        input=" << input << "\n"
++                      << "     expected=" << expected << "\n"
++                      << "       actual=" << actual;
++            if (!why.empty()) std::cerr << "\n        (" << why << ")";
++            std::cerr << "\n";
++        }
++    }
++
++    std::cout << "path_spoof_test: " << (total - failed) << "/" << total << " passed\n";
++    return failed == 0 ? 0 : 1;
++}
+diff --git a/core/hook/src/test/resources/golden/path_spoof_vectors.tsv b/core/hook/src/test/resources/golden/path_spoof_vectors.tsv
+new file mode 100644
+index 0000000..bf7cb5c
+--- /dev/null
++++ b/core/hook/src/test/resources/golden/path_spoof_vectors.tsv
+@@ -0,0 +1,30 @@
++# N1a 路径伪装 golden 向量（host g++ + 真机共用同一份判据）
++# op	guest_pkg	input	expected	flag
++# expected 约定：rewrite/redirect_alias 用 "unchanged" 表示原样；hidden 用 keep/drop；transform 用 keep/drop 或改写后的行
++# flag 约定：rewrite 的 host_fallback 表示"这是容器自身路径，没有 guest 等价物"
++synthetic_apk	mark.via	-	/data/app/~~VmK8x2==/mark.via-VmK8x2==/base.apk	
++synthetic_lib	mark.via	libfoo.so	/data/app/~~VmK8x2==/mark.via-VmK8x2==/lib/arm64/libfoo.so	
++synthetic_apk	com.sandbox.probe	-	/data/app/~~VmK8x2==/com.sandbox.probe-VmK8x2==/base.apk	
++synthetic_lib	com.sandbox.probe	libprobe.so	/data/app/~~VmK8x2==/com.sandbox.probe-VmK8x2==/lib/arm64/libprobe.so	
++rewrite	mark.via	/data/user/0/com.nextvm.app/files/virtual/apks/mark.via_1.apk	/data/app/~~VmK8x2==/mark.via-VmK8x2==/base.apk	
++rewrite	mark.via	/data/user/0/com.nextvm.app/files/virtual/apks/mark.via_1_split_config.arm64.apk	/data/app/~~VmK8x2==/mark.via-VmK8x2==/split_config.arm64.apk	
++rewrite	mark.via	/data/user/0/com.nextvm.app/files/virtual/data/mark.via_1/lib/arm64/libfoo.so	/data/app/~~VmK8x2==/mark.via-VmK8x2==/lib/arm64/libfoo.so	
++rewrite	mark.via	/data/user/0/com.nextvm.app/files/virtual/data/mark.via_1/files/x.mht	/data/data/mark.via/files/x.mht	
++rewrite	com.sandbox.probe	/data/user/0/com.nextvm.app/files/virtual/apks/com.sandbox.probe_1.apk	/data/app/~~VmK8x2==/com.sandbox.probe-VmK8x2==/base.apk	
++rewrite	mark.via	/data/user/0/com.nextvm.app/files/virtual/apks/mark.via_1.apk (deleted)	/data/app/~~VmK8x2==/mark.via-VmK8x2==/base.apk (deleted)	
++rewrite	mark.via	/data/user/0/com.nextvm.app/files/native_user0.txt	/data/app/~~VmK8x2==/mark.via-VmK8x2==/base.apk	host_fallback
++rewrite	mark.via	/system/lib64/libc.so	unchanged	
++rewrite	mark.via	/data/data/mark.via/files/x	unchanged	
++hidden	-	7f0000000000-7f0000001000 r--p 00000000 fd:00 123 /data/app/x/libnextvm-native.so	drop	
++hidden	-	7f0000000000-7f0000001000 r--p 00000000 fd:00 123 /data/app/x/libDexHelper.so	keep	
++hidden	-	7f0000000000-7f0000001000 rw-p 00000000 00:00 0 [anon:lsplant]	drop	
++hidden	-	7f0000000000-7f0000001000 r-xp 00000000 fd:00 9 /system/lib64/libc.so	keep	
++transform	mark.via	7f0000000000-7f0000001000 r--p 00000000 fd:00 123 /data/user/0/com.nextvm.app/files/virtual/apks/mark.via_1.apk	7f0000000000-7f0000001000 r--p 00000000 fd:00 123 /data/app/~~VmK8x2==/mark.via-VmK8x2==/base.apk	
++transform	mark.via	7f0000000000-7f0000001000 r-xp 00000000 fd:00 9 /data/user/0/com.nextvm.app/files/virtual/data/mark.via_1/lib/arm64/libfoo.so	7f0000000000-7f0000001000 r-xp 00000000 fd:00 9 /data/app/~~VmK8x2==/mark.via-VmK8x2==/lib/arm64/libfoo.so	
++transform	mark.via	7f0000000000-7f0000001000 r--p 00000000 fd:00 9 /data/user/0/com.nextvm.app/files/virtual/data/mark.via_1/files/x.mht	7f0000000000-7f0000001000 r--p 00000000 fd:00 9 /data/data/mark.via/files/x.mht	
++transform	mark.via	7f0000000000-7f0000001000 r--p 00000000 fd:00 7 /data/user/0/com.nextvm.app/files/libnextvm-native.so	drop	
++transform	mark.via	7f0000000000-7f0000001000 r-xp 00000000 fd:00 9 /system/lib64/libc.so	keep	
++redirect_alias	mark.via	/data/user/0/mark.via/files/a	/sandbox/i1/files/a	
++redirect_alias	mark.via	/data/data/mark.via/files/a	/sandbox/i1/files/a	
++redirect_alias	mark.via	/sdcard/Download/a	/sandbox/i1/sdcard/Download/a	
++redirect_alias	mark.via	/system/bin/sh	unchanged	

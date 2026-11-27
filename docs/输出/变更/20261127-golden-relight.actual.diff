@@ -1,0 +1,54 @@
+diff --git a/core/virtualization/src/test/resources/breadcrumb-golden/via-1.log b/core/virtualization/src/test/resources/breadcrumb-golden/via-1.log
+index 0015a0e..bc9e802 100644
+--- a/core/virtualization/src/test/resources/breadcrumb-golden/via-1.log
++++ b/core/virtualization/src/test/resources/breadcrumb-golden/via-1.log
+@@ -27,6 +27,7 @@ androidx.startup.StartupException: java.lang.ClassNotFoundException: androidx.em
+ 	at androidx.startup.InitializationProvider.onCreate(r8-map-id-<MAPID>:<LINE>)
+ 	at android.content.ContentProvider.attachInfo(ContentProvider.java:<LINE>)
+ 	at android.content.ContentProvider.attachInfo(ContentProvider.java:<LINE>)
++	at com.nextvm.core.virtualization.lifecycle.startup.ContentProviderInitializer.install(ContentProviderInitializer.kt:<LINE>)
+ 	at com.nextvm.core.virtualization.lifecycle.VirtualApplicationManager.initContentProviders(VirtualApplicationManager.kt:<LINE>)
+ 	at com.nextvm.core.virtualization.lifecycle.VirtualApplicationManager.bindViaFrameworkLoadedApk(VirtualApplicationManager.kt:<LINE>)
+ 	at com.nextvm.core.virtualization.lifecycle.VirtualApplicationManager.bindApplication(VirtualApplicationManager.kt:<LINE>)
+@@ -56,12 +57,12 @@ Caused by: java.lang.ClassNotFoundException: androidx.emoji2.text.EmojiCompatIni
+ 	at java.lang.Class.forName(Class.java:<LINE>)
+ 	at java.lang.Class.forName(Class.java:<LINE>)
+ 	at m0.a.b(r8-map-id-<MAPID>:<LINE>)
+-	... 28 more
++	... 29 more
+ Caused by: java.lang.ClassNotFoundException: Didn't find class "androidx.emoji2.text.EmojiCompatInitializer" on path: DexPathList[[zip file "/data/user/0/com.nextvm.app/files/virtual/apks/mark.via_<TS>.apk"],nativeLibraryDirectories=[/data/user/0/com.nextvm.app/files/virtual/data/mark.via_<TS>/lib, /system/lib64, /system_ext/lib64]]
+ 	at dalvik.system.BaseDexClassLoader.findClass(BaseDexClassLoader.java:<LINE>)
+ 	at java.lang.ClassLoader.loadClass(ClassLoader.java:<LINE>)
+ 	at java.lang.ClassLoader.loadClass(ClassLoader.java:<LINE>)
+-	... 32 more
++	... 33 more
+ Application.onCreate enter mark.via.BrowserApp
+ Application.onCreate exit ok
+ v116-plugin-probe PluginManagerProvider registered=false (contentProviders=1)
+diff --git a/core/virtualization/src/test/resources/breadcrumb-golden/via-2.log b/core/virtualization/src/test/resources/breadcrumb-golden/via-2.log
+index 0015a0e..bc9e802 100644
+--- a/core/virtualization/src/test/resources/breadcrumb-golden/via-2.log
++++ b/core/virtualization/src/test/resources/breadcrumb-golden/via-2.log
+@@ -27,6 +27,7 @@ androidx.startup.StartupException: java.lang.ClassNotFoundException: androidx.em
+ 	at androidx.startup.InitializationProvider.onCreate(r8-map-id-<MAPID>:<LINE>)
+ 	at android.content.ContentProvider.attachInfo(ContentProvider.java:<LINE>)
+ 	at android.content.ContentProvider.attachInfo(ContentProvider.java:<LINE>)
++	at com.nextvm.core.virtualization.lifecycle.startup.ContentProviderInitializer.install(ContentProviderInitializer.kt:<LINE>)
+ 	at com.nextvm.core.virtualization.lifecycle.VirtualApplicationManager.initContentProviders(VirtualApplicationManager.kt:<LINE>)
+ 	at com.nextvm.core.virtualization.lifecycle.VirtualApplicationManager.bindViaFrameworkLoadedApk(VirtualApplicationManager.kt:<LINE>)
+ 	at com.nextvm.core.virtualization.lifecycle.VirtualApplicationManager.bindApplication(VirtualApplicationManager.kt:<LINE>)
+@@ -56,12 +57,12 @@ Caused by: java.lang.ClassNotFoundException: androidx.emoji2.text.EmojiCompatIni
+ 	at java.lang.Class.forName(Class.java:<LINE>)
+ 	at java.lang.Class.forName(Class.java:<LINE>)
+ 	at m0.a.b(r8-map-id-<MAPID>:<LINE>)
+-	... 28 more
++	... 29 more
+ Caused by: java.lang.ClassNotFoundException: Didn't find class "androidx.emoji2.text.EmojiCompatInitializer" on path: DexPathList[[zip file "/data/user/0/com.nextvm.app/files/virtual/apks/mark.via_<TS>.apk"],nativeLibraryDirectories=[/data/user/0/com.nextvm.app/files/virtual/data/mark.via_<TS>/lib, /system/lib64, /system_ext/lib64]]
+ 	at dalvik.system.BaseDexClassLoader.findClass(BaseDexClassLoader.java:<LINE>)
+ 	at java.lang.ClassLoader.loadClass(ClassLoader.java:<LINE>)
+ 	at java.lang.ClassLoader.loadClass(ClassLoader.java:<LINE>)
+-	... 32 more
++	... 33 more
+ Application.onCreate enter mark.via.BrowserApp
+ Application.onCreate exit ok
+ v116-plugin-probe PluginManagerProvider registered=false (contentProviders=1)
