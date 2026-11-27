@@ -106,11 +106,11 @@ jobs:
           /tmp/path_pattern_test
           /tmp/path_spoof_test core/hook/src/test/resources/golden/path_spoof_vectors.tsv
 
-      - name: Verify "(deleted)" suffix length (evidence, not assertion)
+      - name: Verify "(deleted)" suffix length (evidence + regression guard)
         working-directory: sensor
-        # 信息性步骤：把" (deleted)" 到底是几个字符、源码里 compare(size - N, N, …) 能否成立
-        # 算给 CI 看。缺陷未修时仍绿（--strict 才会红，留给修复后防回退用）。
-        run: node tools/analyze/verify-deleted-suffix.mjs --root ../container
+        # 修复后（2026-11-27）这里是**守卫**：比较处必须用 kDeletedSuffixLen，常量必须由 sizeof 派生。
+        # 谁再把长度手写成数字，这一步就红（--strict）。
+        run: node tools/analyze/verify-deleted-suffix.mjs --root ../container --strict
 
   # 仅编译 :app（Gradle 会自动带上全部 :feature:*）—— 2026-11-27 新增，用户允许。
   # 动机：feature/app 层的 Kotlin 类型错误只有编译器能查，而 matrix 只编 :core:*，

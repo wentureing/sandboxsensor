@@ -1,0 +1,158 @@
+diff --git a/core/hook/src/main/cpp/core/path_spoof.cpp b/core/hook/src/main/cpp/core/path_spoof.cpp
+index 4bb49dd..83f6209 100644
+--- a/core/hook/src/main/cpp/core/path_spoof.cpp
++++ b/core/hook/src/main/cpp/core/path_spoof.cpp
+@@ -30,10 +30,11 @@ bool rewrite_virtual_path(const std::string& guest_pkg, const std::string& path,
+     if (host_fallback != nullptr) *host_fallback = false;
+     std::string core = path;
+     std::string suffix;
+-    if (core.size() >= 11 &&
+-        core.compare(core.size() - 11, 11, " (deleted)") == 0) {
+-        core.erase(core.size() - 11);
+-        suffix = " (deleted)";
++    if (core.size() >= kDeletedSuffixLen &&
++        core.compare(core.size() - kDeletedSuffixLen, kDeletedSuffixLen,
++                     kDeletedSuffix) == 0) {
++        core.erase(core.size() - kDeletedSuffixLen);
++        suffix = kDeletedSuffix;
+     }
+ 
+     // Guest APK 文件：base + split（虚拟存储里 split 名为
+diff --git a/core/hook/src/main/cpp/core/path_spoof.h b/core/hook/src/main/cpp/core/path_spoof.h
+index 40635a4..f2e1bec 100644
+--- a/core/hook/src/main/cpp/core/path_spoof.h
++++ b/core/hook/src/main/cpp/core/path_spoof.h
+@@ -4,6 +4,7 @@
+ // 说明见 docs/代码镜像/core/hook/cpp/core/path_spoof.md
+ #pragma once
+ 
++#include <cstddef>
+ #include <string>
+ 
+ #include "path_rules.h"
+@@ -11,6 +12,11 @@
+ namespace nextvm {
+ namespace spoof {
+ 
++/** maps 行/路径里的 " (deleted)" 后缀（含前导空格）。
++ *  长度一律用 kDeletedSuffixLen，**不要手数**（历史上写过 11，导致剥离永不生效）。 */
++inline constexpr char kDeletedSuffix[] = " (deleted)";
++inline constexpr std::size_t kDeletedSuffixLen = sizeof(kDeletedSuffix) - 1;
++
+ /** 合成"正常安装"的 base.apk 路径。 */
+ std::string synthetic_apk_path(const std::string& guest_pkg);
+ 
+diff --git a/core/hook/src/main/cpp/native-hook.cpp b/core/hook/src/main/cpp/native-hook.cpp
+index 46edd5b..be85e0f 100644
+--- a/core/hook/src/main/cpp/native-hook.cpp
++++ b/core/hook/src/main/cpp/native-hook.cpp
+@@ -3940,9 +3940,11 @@ int sc_rewrite_fd_target(const char* in, char* out, int cap) {
+     while (in[clen] && clen < 500) { core[clen] = in[clen]; clen++; }
+     core[clen] = 0;
+     bool deleted = false;
+-    if (clen >= 11 && sc_streq(core + clen - 11, " (deleted)")) {
+-        core[clen - 11] = 0;
+-        clen -= 11;
++    // 长度来自 core/path_spoof.h 的常量：历史上这里手写成 11（实际 10 字符），剥离永不生效。
++    constexpr int kDel = static_cast<int>(nextvm::spoof::kDeletedSuffixLen);
++    if (clen >= kDel && sc_streq(core + clen - kDel, nextvm::spoof::kDeletedSuffix)) {
++        core[clen - kDel] = 0;
++        clen -= kDel;
+         deleted = true;
+     }
+     int olen = 0;
+@@ -3993,7 +3995,7 @@ int sc_rewrite_fd_target(const char* in, char* out, int cap) {
+     } else {
+         return -1;
+     }
+-    if (deleted) emit(" (deleted)");
++    if (deleted) emit(nextvm::spoof::kDeletedSuffix);
+     out[olen] = 0;
+     return olen;
+ }
+diff --git a/core/hook/src/test/cpp/path_spoof_test.cpp b/core/hook/src/test/cpp/path_spoof_test.cpp
+index 72c8f39..8d6b0ce 100644
+--- a/core/hook/src/test/cpp/path_spoof_test.cpp
++++ b/core/hook/src/test/cpp/path_spoof_test.cpp
+@@ -5,6 +5,7 @@
+ //
+ // 用法：path_spoof_test <path_spoof_vectors.tsv>
+ #include <cstdio>
++#include <cstring>
+ #include <fstream>
+ #include <iostream>
+ #include <string>
+@@ -113,6 +114,43 @@ int main(int argc, char** argv) {
+         checkInv("alias_empty_rules_miss",
+                  nextvm::spoof::redirect_path_with_alias(empty, "/data/user/0/mark.via/x").empty(),
+                  "(empty table)");
++
++        // ---- 针对 (deleted) 缺陷的回归（历史上长度手写成 11，剥离永不生效）----
++        // 1) 常量自洽：长度必须等于后缀字符串长度（防止"改字符串不改长度"的第二形态）
++        checkInv("deleted_suffix_len_matches_text",
++                 nextvm::spoof::kDeletedSuffixLen ==
++                     std::strlen(nextvm::spoof::kDeletedSuffix),
++                 std::to_string(nextvm::spoof::kDeletedSuffixLen));
++        // 2) 行为：剥离必须生效、后缀必须原样出现在输出里，且**不得**被判 host_fallback
++        {
++            const std::string in =
++                "/data/user/0/com.nextvm.app/files/virtual/apks/mark.via_1.apk" +
++                std::string(nextvm::spoof::kDeletedSuffix);
++            std::string out2;
++            bool hf = true;
++            const bool rew = nextvm::spoof::rewrite_virtual_path("mark.via", in, out2, &hf);
++            checkInv("deleted_suffix_stripped",
++                     rew && !hf &&
++                         out2 == nextvm::spoof::synthetic_apk_path("mark.via") +
++                                     nextvm::spoof::kDeletedSuffix,
++                     out2);
++        }
++        // 3) maps 层：同一行必须改写（保留后缀），不得被丢弃
++        {
++            const std::string in =
++                "7f0000000000-7f0000001000 r--p 00000000 fd:00 123 "
++                "/data/user/0/com.nextvm.app/files/virtual/apks/mark.via_1.apk" +
++                std::string(nextvm::spoof::kDeletedSuffix);
++            std::string out3;
++            const bool kept = nextvm::spoof::transform_maps_line("mark.via", in.c_str(), out3);
++            checkInv("deleted_suffix_maps_kept",
++                     kept &&
++                         stripTrailingNewline(out3) ==
++                             "7f0000000000-7f0000001000 r--p 00000000 fd:00 123 " +
++                                 nextvm::spoof::synthetic_apk_path("mark.via") +
++                                 nextvm::spoof::kDeletedSuffix,
++                     stripTrailingNewline(out3));
++        }
+     }
+ 
+     std::string line;
+diff --git a/core/hook/src/test/resources/golden/path_spoof_vectors.tsv b/core/hook/src/test/resources/golden/path_spoof_vectors.tsv
+index e4730cd..783432a 100644
+--- a/core/hook/src/test/resources/golden/path_spoof_vectors.tsv
++++ b/core/hook/src/test/resources/golden/path_spoof_vectors.tsv
+@@ -11,10 +11,10 @@ rewrite	mark.via	/data/user/0/com.nextvm.app/files/virtual/apks/mark.via_1_split
+ rewrite	mark.via	/data/user/0/com.nextvm.app/files/virtual/data/mark.via_1/lib/arm64/libfoo.so	/data/app/~~VmK8x2==/mark.via-VmK8x2==/lib/arm64/libfoo.so	
+ rewrite	mark.via	/data/user/0/com.nextvm.app/files/virtual/data/mark.via_1/files/x.mht	/data/data/mark.via/files/x.mht	
+ rewrite	com.sandbox.probe	/data/user/0/com.nextvm.app/files/virtual/apks/com.sandbox.probe_1.apk	/data/app/~~VmK8x2==/com.sandbox.probe-VmK8x2==/base.apk	
+-# 已知缺陷（历史，非 N1a 引入）：源码用 size>=11 / compare(len-11, 11, " (deleted)")，但 " (deleted)" 只有 10 字符
+-#   → 剥离永不生效 → 带 (deleted) 的 **guest apk** 路径落进 "含 nextvm" 分支 = host_fallback（maps 里会被丢弃）。
+-#   现状按下行固定；修它属行为变更（R3 类），届时要同时改 native-hook.cpp 的 sc_rewrite_fd_target（同样写 11）。
+-rewrite	mark.via	/data/user/0/com.nextvm.app/files/virtual/apks/mark.via_1.apk (deleted)	/data/app/~~VmK8x2==/mark.via-VmK8x2==/base.apk	host_fallback
++# (deleted) 后缀：2026-11-27 已修（上游缺陷 —— 长度曾手写成 11，实际 10 字符，剥离永不生效）。
++# 剥离生效后，后缀必须原样保留；长度一律取 core/path_spoof.h 的 kDeletedSuffixLen。
++rewrite	mark.via	/data/user/0/com.nextvm.app/files/virtual/apks/mark.via_1.apk (deleted)	/data/app/~~VmK8x2==/mark.via-VmK8x2==/base.apk (deleted)	
++rewrite	mark.via	/data/user/0/com.nextvm.app/files/virtual/apks/mark.via_1_split_config.arm64.apk (deleted)	/data/app/~~VmK8x2==/mark.via-VmK8x2==/split_config.arm64.apk (deleted)	
+ # data 目录分支不受该缺陷影响（rest 自带 " (deleted)" 文本），所以后缀照常保留
+ rewrite	mark.via	/data/user/0/com.nextvm.app/files/virtual/data/mark.via_1/files/x (deleted)	/data/data/mark.via/files/x (deleted)	
+ rewrite	mark.via	/data/user/0/com.nextvm.app/files/native_user0.txt	/data/app/~~VmK8x2==/mark.via-VmK8x2==/base.apk	host_fallback
+@@ -36,8 +36,8 @@ redirect_alias	mark.via	/system/bin/sh	unchanged
+ # ---- 完善：缺陷的边界与其他分支（每条都在固定一个具体行为）----
+ # lib 分支不依赖 (deleted) 剥离：后缀是 rest 文本的一部分，所以照常保留
+ rewrite	mark.via	/data/user/0/com.nextvm.app/files/virtual/data/mark.via_1/lib/arm64/libfoo.so (deleted)	/data/app/~~VmK8x2==/mark.via-VmK8x2==/lib/arm64/libfoo.so (deleted)	
+-# 缺陷在 maps 层的后果：带 (deleted) 的 guest apk 行被判 host_fallback → 整行丢弃
+-transform	mark.via	7f0000000000-7f0000001000 r--p 00000000 fd:00 123 /data/user/0/com.nextvm.app/files/virtual/apks/mark.via_1.apk (deleted)	drop	
++# 修复后在 maps 层的落点：该行被改写（保留 (deleted)），不再被判 host_fallback 而丢弃
++transform	mark.via	7f0000000000-7f0000001000 r--p 00000000 fd:00 123 /data/user/0/com.nextvm.app/files/virtual/apks/mark.via_1.apk (deleted)	7f0000000000-7f0000001000 r--p 00000000 fd:00 123 /data/app/~~VmK8x2==/mark.via-VmK8x2==/base.apk (deleted)	
+ # 任何 /files/virtual/apks/*.apk 都映射到**当前 spoof 包名**的合成路径（maps 里不应出现别的 guest 的虚拟路径）
+ rewrite	mark.via	/data/user/0/com.other.app/files/virtual/apks/x.apk	/data/app/~~VmK8x2==/mark.via-VmK8x2==/base.apk	
+ # 不含 virtual 标记、也不含 nextvm 的路径一律不动（外置存储真路径族）

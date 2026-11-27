@@ -35,21 +35,21 @@
 | 3 | `/data/user/0/` 判定：`std::strncmp` → `std::string::compare(0, 13, …)` | ✅ 中性 | `compare` 在 `size() < 13` 时比较长度自动截短，与原 `strncmp` 遇 `'\0'` 提前结束的结果一致（都不相等） |
 | 4 | `redirect_path` 的等价族兜底从 `native-hook.cpp` 移入本文件（`redirect_path_with_alias`） | ✅ 中性 | 两段式语义、`空串=未命中` 契约、只兜底一次，均逐字保留；门面仍保留 `path == nullptr \|\| path[0] == '\0'` 的前置检查 |
 | 5 | `rewrite_virtual_path` / `transform_maps_line` 的三分支顺序、`(deleted)` 后缀、`lib/` 判定 | ✅ 无变化 | 逐字搬迁，只把 `g_spoofed_package_name` 换成 `guest_pkg` |
-| 6 | `" (deleted)"` 后缀剥离用 `core.size() >= 11 && core.compare(core.size() - 11, 11, " (deleted)")` | ❌ **历史缺陷（上游 `a1871a6` / woand / 2026-10-10，fork 点 `63346e6` 之前既有；本次逐字保留）** | `" (deleted)"` 实际只有 **10** 个字符（空格 + 9），代码按 **11** 比较（很可能把 `sizeof(" (deleted)")`=11 当成了长度）⇒ **剥离永不生效**。后果：带 `(deleted)` 的 **guest apk** 路径不满足 `.apk` 结尾 → 落进"含 nextvm"分支 ⇒ `host_fallback=true`，`transform_maps_line` 因此**丢弃该行**，合成路径也丢后缀。<br>N1a **不改行为**（等价搬迁），golden 用一条 `flag=host_fallback` 的用例固定现状；修它是行为变更（R3 类），且**必须同时**改 `native-hook.cpp` 的 `sc_rewrite_fd_target`（上游 `e590c32` 同样写 11）。影响面：只影响 maps 里"已删除的 apk mmap"行可见性与 seccomp 观测文本，不影响隔离。<br>**证据（可复跑）**：`node tools/analyze/verify-deleted-suffix.mjs` 会算出 char=10 / sizeof=11，并对两处源码逐行判定"不成立" |
+| 6 | `" (deleted)"` 后缀剥离（原 `core.size() >= 11 && compare(size-11, 11, " (deleted)")`） | ✅ **已修（2026-11-27，行为变更）** | 原实现把长度手写成 **11**（`" (deleted)"` 实际 **10** 字符，很可能误用了 `sizeof`），导致**剥离永不生效**：带 `(deleted)` 的 guest apk 路径不满足 `.apk` 结尾 → 落进"含 nextvm"分支 ⇒ `host_fallback=true` ⇒ maps 里整行被丢弃。<br>**修法**：`kDeletedSuffix` / `kDeletedSuffixLen`（`sizeof - 1` 派生）提到头文件，本文件与 `native-hook.cpp` 的 `sc_rewrite_fd_target` **共用同一常量**。<br>**测试**：向量 3 条（apk/split/lib+deleted）+ 不变量 3 条（长度自洽、剥离生效、maps 层保留）+ CI 静态守卫（`verify-deleted-suffix.mjs --strict`）。<br>**溯源**：上游 `a1871a6`（woand）/ `e590c32`（woand），都在 fork 点 `63346e6` 之前；fork 后零次修改。详见 `docs/输出/变更/20261127-deleted-suffix-11to10.md` |
 
 ## 约束与坑
 
 1. **不得 include** `<jni.h>` / `<android/*>` / `<link.h>` / `<sys/*>` —— 一旦引入，host 侧 `cpp-core-test` 就编不过（`架构-C++测试夹具设计.md` §一）。
 2. **新 `.cpp` 必须登记进 `core/hook/src/main/cpp/CMakeLists.txt`**，否则 Android 侧 `undefined symbol`（本项目已踩过一次）。
 3. `maps_line_visible` 的关键词表**属于契约**：想隐藏新的框架特征，先改 `golden/path_spoof_vectors.tsv`，再改表（规则 18.1）。
-4. **`(deleted)` 那条 golden 是"固定现状"，不是"期望行为"**（见偏差登记 #6）：`flag=host_fallback` 的用例故意保留，
-   谁要"顺手把 11 改成 10"就是在做行为变更 —— 先走变更流程、同步 `sc_rewrite_fd_target`、重记 `maps_lines/maps_hidden` 基线。
-4. 热路径（每次 I/O 的 `redirect_path`）：本文件**不许**加日志 / 加锁 / 新增分配；`std::string` 返回值签名保持原样（`设计-native重构与临时适配器.md` §7.3）。
-5. 单测是 `core/hook/src/test/cpp/path_spoof_test.cpp` + `src/test/resources/golden/path_spoof_vectors.tsv`，
+4. **`(deleted)` 后缀一律用 `kDeletedSuffix` / `kDeletedSuffixLen`**：长度由 `sizeof(kDeletedSuffix) - 1` 派生；
+   谁再手写 11/10，CI 的 `verify-deleted-suffix.mjs --strict` 会红（这条守卫就是为这个缺陷加的）。
+5. 热路径（每次 I/O 的 `redirect_path`）：本文件**不许**加日志 / 加锁 / 新增分配；`std::string` 返回值签名保持原样（`设计-native重构与临时适配器.md` §7.3）。
+6. 单测是 `core/hook/src/test/cpp/path_spoof_test.cpp` + `src/test/resources/golden/path_spoof_vectors.tsv`，
    CI job `cpp-core-test` 里编译 **`path_rules.cpp + path_pattern.cpp + path_spoof.cpp + path_spoof_test.cpp`**。
    **必须带 `path_pattern.cpp`**：`path_rules.cpp` 内部引用 `pattern_matches` / `pattern_is_root_form` / `parse_pattern`，
    漏了它会在**链接期**报 `undefined reference`（2026-11-27 CI 首跑就是这么红的）。
-6. 真机判据：`nativeGetHookStats` 的 `maps_lines` / `maps_hidden` 与 `现状-native-关键过程基线.md` 同量级；`spoof=0` 属正常（见该文 §四）。
-7. `guest_pkg` 为空串时行为：合成路径会变成 `/data/app/~~VmK8x2==/-VmK8x2==/base.apk`（不崩、无回退），
+7. 真机判据：`nativeGetHookStats` 的 `maps_lines` / `maps_hidden` 与 `现状-native-关键过程基线.md` 同量级；`spoof=0` 属正常（见该文 §四）。
+8. `guest_pkg` 为空串时行为：合成路径会变成 `/data/app/~~VmK8x2==/-VmK8x2==/base.apk`（不崩、无回退），
    但**没有任何调用方这样传** —— 门面传的是 `g_spoofed_package_name`，未设置时为空串，此时 maps 里不会出现 guest 路径，
    所以这条路径实际不可达；若将来要防，可在门面加 early-return，不要在本文件加分支（保持纯函数简单）。

@@ -80,6 +80,7 @@
 | 10 | 探针 `N16` **已结案（2026-11-27）** | 换探针 `2e7e675` 后实测 `N16.libc_maps lines=3252 pkg_hit=18`，与 `N10`（`fopen` 路径）一致；`spoof/maps_lines` 仍 0 且解释成立（无 native 读者）。见 `docs/输出/变更/20261127-golden重采与探针2e7e675.md` |
 | 11 | 探针报告 `106` 条 / `99` 唯一 id | `ContentProvider.onCreate` 与 `Activity.onCreate` 各跑一轮 → `N11..N16`、`P28` 重复；首轮处于早期窗口故 N 系列首轮 fail。合并时按 id 去重或 provider 阶段不跑 native 项 |
 | 12 | `P25/P26` 取样时机 | `UiProbe` 在 `ProbeActivity.onCreate` 跑，`P27` 同时显示 `token=false attached=false` → `BadTokenException`。改到 `onWindowFocusChanged`/`onResume` 之后再跑（探针侧改动） |
+| 13 | `(deleted)` 后缀剥离 **已修（2026-11-27）** | 上游 fork 前遗留（`a1871a6`/`e590c32`，woand）：长度手写 11（实际 10）⇒ 剥离永不生效 ⇒ maps 里带该后缀的 guest apk 行被整行丢弃（实测零触发）。已改为 `kDeletedSuffixLen`（`sizeof - 1`，两处共用）+ 3 条向量 + 3 条不变量 + CI 静态守卫。见 `docs/输出/变更/20261127-deleted-suffix-11to10.md` |
 
 ---
 

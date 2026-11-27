@@ -115,12 +115,17 @@
 | 批 | 内容 | 状态 |
 | --- | --- | --- |
 | **R2-0** | 契约工具 `check-jni-contract.mjs` | ✅ **已落地**（工具存在、当前 24↔29 通过）；总表里写的"23 ↔ 23"已过时 |
-| **R2-1 = N1a** | ① 路径/映射合成 ② 等价族兜底 → `core/path_spoof.{h,cpp}` | ✅ **代码 + 33 条 golden 向量 + host 测试 + 镜像文档已落地**（`20261127-N1a-path-spoof.md`）；**CI 待跑** |
+| **R2-1 = N1a** | ① 路径/映射合成 ② 等价族兜底 → `core/path_spoof.{h,cpp}` | ✅ **已落地**：代码 + 33 条向量 + 5 条不变量 + 镜像文档（`20261127-N1a-path-spoof.md`）；CI 侧修了两轮（链接缺 `path_pattern.cpp`、`(deleted)` 期望值），见该文 §八 |
 | **R2-2 = N1b/N2** | ① maps 行过滤/改写 ② `status`/`stat` 生成 → `core/proc_spoof.{h,cpp}` | ⏳ 未开始 |
 | **R2-3 = N3** | seccomp 归因 → `core/seccomp_attr.{h,cpp}` | ⏳ 未开始 |
 | **R2-4 = N4** | 库过滤判定表 → `core/lib_filter.{h,cpp}` | ⏳ 未开始 |
 
-同一篇总表的 **D2 目标**：`native-hook.cpp` **≤ 5 200 行**（现在 8003 → 差 2 800 行，A/B/C 三类纯逻辑约 1 500–2 000 行可下沉）。
+同一篇总表的 **D2 目标**：`native-hook.cpp` **≤ 5 200 行**（N1a 后 7886 → 还差 2 686 行，A/B/C 三类纯逻辑约 1 500–2 000 行可下沉）。
+
+> **R3 先行一项（已修，2026-11-27）**：`(deleted)` 后缀剥离 11 → 10 —— 上游 fork 前遗留（`a1871a6`/`e590c32`，woand）。
+> 修法把长度提成 `kDeletedSuffixLen`（`sizeof - 1` 派生，`path_spoof.h` 与 `native-hook.cpp` 的 `sc_rewrite_fd_target` 共用），
+> 加 3 条向量 + 3 条不变量 + CI 静态守卫（`tools/analyze/verify-deleted-suffix.mjs --strict`）。
+> 见 `docs/输出/变更/20261127-deleted-suffix-11to10.md`。**这是"抽纯逻辑 + 写向量"逼出来的历史缺陷**（此前零触发）。
 
 ### 5.2 N1a 的完整计划（`计划-native-N1a-path-spoof.md`，已就绪待执行）
 
@@ -158,7 +163,7 @@
 | `架构/架构-C++测试夹具设计.md` | 为什么不能整文件 host 编、S1 抽纯逻辑、向量单一来源 | ✅ 当前（S1 已落地；**S4 设备自检暂停**） |
 | `设计/设计-native重构与临时适配器.md` | 怎么拆、三种适配器、性能评估、测试框架与 hook 库选型 | ✅ 当前 |
 | `现状/现状-native-关键过程基线.md` | 每批重构要对照的字段与量级 | ✅ 当前（本轮补了 N16 实证） |
-| `计划/计划-native-N1a-path-spoof.md` | N1a 的范围/签名/适配器/golden/验收 | ⏳ 计划就绪、未执行 |
+| `计划/计划-native-N1a-path-spoof.md` | N1a 的范围/签名/适配器/golden/验收 | ✅ 已按计划执行（见 `20261127-N1a-path-spoof.md`） |
 | `计划/计划-重构阶段任务总表.md` | R1–R4 与 DoD（含 D2 ≤5 200 行） | ⚠️ R2-0 的"23↔23"已过时 |
 | `架构/架构-native-hook覆盖不到Java层.md` | 为什么 Java 层必须另走 `RegisterNatives` | ✅ 原理仍成立 |
 | `架构/架构-多层hook该拦几层与幂等前提.md` | 该 hook 哪一层的三条判据 + 翻译幂等已实测 | ✅ 仍成立（新增规则必须重新验幂等） |
@@ -189,7 +194,7 @@
 
 | 顺 | 动作 | 为什么排这里 |
 | --- | --- | --- |
-| 0 | ~~文档对齐~~ / ~~**N1a**~~ | ✅ 均已完成（文档已对齐；N1a 代码+测试+镜像文档落地，CI 待跑） |
+| 0 | ~~文档对齐~~ / ~~**N1a**~~ / ~~`(deleted)` 修复~~ | ✅ 均已完成 |
 | 1 | **N1b**（`build_maps_content(pkg, real_content)` / `build_status_content` / `build_stat_content`） | 把 `/proc` 生成的"读文件"与"转换"分开，才可 host 测；N1a 样板已就位 |
 | 2 | N3 seccomp 归因 / N4 库过滤表 | 纯表 + 判定，改动面小 |
 | 3 | L6 运行期加载库（`libnativeloader.so`） | 唯一影响真实隔离效果的缺口，但成本高，放纯逻辑重构之后 |
