@@ -76,7 +76,7 @@ Kotlin NativeHookBridge ──JNI(24 导出)──► native-hook.cpp
 ### 3.3 输出格式（可比较的基线）
 
 ```
-[Dbg/native] hook stats: libs=415 patched=411 skipped_self=1 skipped_system=3 skipped_self_host=? skipped_graphics=? skipped_syslib=? late_passes=0 late_libs=0 spoof=0 maps_lines=0 maps_hidden=0
+[Dbg/native] hook stats: libs=415 patched=411 applied=? slots=? skipped_self=1 skipped_system=3 skipped_self_host=0 skipped_graphics=7 skipped_syslib=404 late_passes=0 late_libs=0 spoof=0 maps_lines=0 maps_hidden=0
 [Dbg/native] hook stats(+5s):  …同格式…
 [Dbg/native] hook stats(+20s): …同格式…
 ```

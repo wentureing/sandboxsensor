@@ -1,0 +1,75 @@
+diff --git a/core/hook/src/main/cpp/native-hook.cpp b/core/hook/src/main/cpp/native-hook.cpp
+index e89dfd7..a45f46b 100644
+--- a/core/hook/src/main/cpp/native-hook.cpp
++++ b/core/hook/src/main/cpp/native-hook.cpp
+@@ -122,6 +122,8 @@ struct NativeHookStats {
+     std::atomic<int> libs_skipped_self_host{0};   // 宿主包名下的库（com.nextvm.app）
+     std::atomic<int> libs_skipped_graphics{0};    // 图形栈（六条关键词）
+     std::atomic<int> libs_skipped_syslib{0};      // 其余系统库（NS_HOOK_SYSTEM_LIBS=0）
++    std::atomic<int> libs_applied{0};             // 真正成功替换过至少一个 GOT 槽的库数
++    std::atomic<int> slots_patched{0};            // GOT 槽替换总次数
+     std::atomic<int> late_passes{0};
+     std::atomic<int> late_libs_added{0};
+     std::atomic<int> spoof_calls{0};
+@@ -1651,6 +1653,7 @@ static bool patch_got_entry(void** got_addr, void* new_func, void** old_func) {
+ 
+     // Patch the GOT entry
+     *got_addr = new_func;
++    g_native_stats.slots_patched.fetch_add(1, std::memory_order_relaxed);
+ 
+     // Restore page permissions (read-only)
+     mprotect(reinterpret_cast<void*>(page_start), page_size, PROT_READ);
+@@ -1668,6 +1671,7 @@ static void patch_library_got(uintptr_t base_addr, const char* lib_name,
+                                const ElfW(Dyn)* dynamic,
+                                const char* only_symbol = nullptr) {
+     if (dynamic == nullptr) return;
++    int applied_here = 0;  // 本库成功替换的 GOT 槽数（N2-C 观测用）
+ 
+     // Find required dynamic entries
+     const ElfW(Sym)* symtab = nullptr;
+@@ -1817,6 +1821,7 @@ static void patch_library_got(uintptr_t base_addr, const char* lib_name,
+                         base_addr + entry.r_offset);
+                     if (patch_got_entry(got_addr, g_hook_entries[h].hook_func,
+                                        g_hook_entries[h].original_func)) {
++                        ++applied_here;
+                         LOGD("Hooked %s in %s (RELA)", sym_name, lib_name);
+                     }
+                     break;
+@@ -1849,6 +1854,7 @@ static void patch_library_got(uintptr_t base_addr, const char* lib_name,
+                         base_addr + entry.r_offset);
+                     if (patch_got_entry(got_addr, g_hook_entries[h].hook_func,
+                                        g_hook_entries[h].original_func)) {
++                        ++applied_here;
+                         LOGD("Hooked %s in %s (REL)", sym_name, lib_name);
+                     }
+                     break;
+@@ -1856,6 +1862,10 @@ static void patch_library_got(uintptr_t base_addr, const char* lib_name,
+             }
+         }
+     }
++
++    if (applied_here > 0) {
++        g_native_stats.libs_applied.fetch_add(1, std::memory_order_relaxed);
++    }
+ }
+ 
+ // Base addresses already processed by a patch pass. Libraries loaded
+@@ -2246,13 +2256,16 @@ Java_com_nextvm_core_hook_NativeHookBridge_nativeGetHookStats(
+     JNIEnv* env, jobject thiz)
+ {
+     (void)thiz;
+-    char buf[480];
++    char buf[640];
+     snprintf(buf, sizeof(buf),
+-             "libs=%d patched=%d skipped_self=%d skipped_system=%d "
++             "libs=%d patched=%d applied=%d slots=%d "
++             "skipped_self=%d skipped_system=%d "
+              "skipped_self_host=%d skipped_graphics=%d skipped_syslib=%d "
+              "late_passes=%d late_libs=%d spoof=%d maps_lines=%d maps_hidden=%d",
+              g_native_stats.libs_scanned.load(),
+              g_native_stats.libs_patched.load(),
++             g_native_stats.libs_applied.load(),
++             g_native_stats.slots_patched.load(),
+              g_native_stats.libs_skipped_self.load(),
+              g_native_stats.libs_skipped_system.load(),
+              g_native_stats.libs_skipped_self_host.load(),
