@@ -47,6 +47,12 @@
 | `libs` / `patched` | 415 / 411 | **允许随版本漂移**（加载库集合随 ROM/版本变）；只记量级 |
 | `late_passes` / `late_libs` | 0 / 0 | 启动后无 dlopen；若某 guest 出现非 0，说明运行期加载了新库（正常） |
 | `spoof` / `maps_lines` / `maps_hidden` | 0 / 0 / 0 | **当前为 0 且有解释**（见 §四）；用于"native 读者"场景 |
+| `skipped_self_host` | **待首取** | N2-B 新增：`patch_library_got` 里因路径含 `com.nextvm.app` 被跳过。**不并入** `skipped_self`（后者必须恒为 1） |
+| `skipped_graphics` | **待首取** | N2-B 新增：图形栈六条关键词命中数。`NS_HOOK_SYSTEM_LIBS=1` 时**仍应计数且仍跳过** |
+| `skipped_syslib` | **待首取** | N2-B 新增：`NS_HOOK_SYSTEM_LIBS=0` 下被跳过的其余系统库（与 callback 层的 `skipped_system` 不同义） |
+
+> **N2-B 起 `hook stats` 行有 12 个 key**（新增 3 个）。判据：`skipped_self` / `skipped_system` / `patched`
+> 三个**旧判据一律不变**；新字段首次真机取值后回填本表，并同时记录 guest / 三阶段。
 
 ---
 

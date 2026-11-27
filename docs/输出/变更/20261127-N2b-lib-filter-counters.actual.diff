@@ -1,0 +1,55 @@
+diff --git a/core/hook/src/main/cpp/native-hook.cpp b/core/hook/src/main/cpp/native-hook.cpp
+index 0a27df9..e89dfd7 100644
+--- a/core/hook/src/main/cpp/native-hook.cpp
++++ b/core/hook/src/main/cpp/native-hook.cpp
+@@ -118,6 +118,10 @@ struct NativeHookStats {
+     std::atomic<int> libs_patched{0};
+     std::atomic<int> libs_skipped_self{0};
+     std::atomic<int> libs_skipped_system{0};
++    // N2-B：patch_library_got 层的过滤命中（此前完全看不到）
++    std::atomic<int> libs_skipped_self_host{0};   // 宿主包名下的库（com.nextvm.app）
++    std::atomic<int> libs_skipped_graphics{0};    // 图形栈（六条关键词）
++    std::atomic<int> libs_skipped_syslib{0};      // 其余系统库（NS_HOOK_SYSTEM_LIBS=0）
+     std::atomic<int> late_passes{0};
+     std::atomic<int> late_libs_added{0};
+     std::atomic<int> spoof_calls{0};
+@@ -1713,13 +1717,19 @@ static void patch_library_got(uintptr_t base_addr, const char* lib_name,
+             nextvm::libfilter::classify_lib(lib_name, NS_HOOK_SYSTEM_LIBS != 0);
+         switch (verdict.reason) {
+             case nextvm::libfilter::Reason::kContainerSelf:
++                g_native_stats.libs_skipped_self_host.fetch_add(
++                    1, std::memory_order_relaxed);
+                 LOGI("GOT patch skipped (container self): %s", lib_name);
+                 break;
+             case nextvm::libfilter::Reason::kGraphicsStack:
++                g_native_stats.libs_skipped_graphics.fetch_add(
++                    1, std::memory_order_relaxed);
+                 LOGI("GOT patch skipped (graphics stack): %s", lib_name);
+                 break;
+             case nextvm::libfilter::Reason::kSystemLib:
+                 if (verdict.decision == nextvm::libfilter::Decision::kSkip) {
++                    g_native_stats.libs_skipped_syslib.fetch_add(
++                        1, std::memory_order_relaxed);
+                     LOGI("GOT patch skipped (system lib, NS_HOOK_SYSTEM_LIBS=0): %s",
+                          lib_name);
+                 }
+@@ -2236,14 +2246,18 @@ Java_com_nextvm_core_hook_NativeHookBridge_nativeGetHookStats(
+     JNIEnv* env, jobject thiz)
+ {
+     (void)thiz;
+-    char buf[320];
++    char buf[480];
+     snprintf(buf, sizeof(buf),
+              "libs=%d patched=%d skipped_self=%d skipped_system=%d "
++             "skipped_self_host=%d skipped_graphics=%d skipped_syslib=%d "
+              "late_passes=%d late_libs=%d spoof=%d maps_lines=%d maps_hidden=%d",
+              g_native_stats.libs_scanned.load(),
+              g_native_stats.libs_patched.load(),
+              g_native_stats.libs_skipped_self.load(),
+              g_native_stats.libs_skipped_system.load(),
++             g_native_stats.libs_skipped_self_host.load(),
++             g_native_stats.libs_skipped_graphics.load(),
++             g_native_stats.libs_skipped_syslib.load(),
+              g_native_stats.late_passes.load(),
+              g_native_stats.late_libs_added.load(),
+              g_native_stats.spoof_calls.load(),

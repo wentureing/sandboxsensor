@@ -32,6 +32,7 @@
 | 2 | `NS_HOOK_SYSTEM_LIBS` 由编译期 `#if` 变成**入参** | ✅ 中性 | 门面传 `NS_HOOK_SYSTEM_LIBS != 0`；宏定义仍在门面（`#ifndef/#define` 保留） |
 | 3 | 系统库开关打开时，原因仍记为 `kSystemLib` 且决策为 `kPatch` | ✅ 中性 | 与原 `#if NS_HOOK_SYSTEM_LIBS`（无日志、继续 patch）等价 |
 | 4 | 日志文本全部留在门面 | ✅ 必要 | 日志是排查契约（`GOT patch skipped (container self)` 等），不能因为抽取而变；且 `core/` 不许 include `android/log.h` |
+| 5 | N2-B：门面按 `reason` 各 +1 计数（`skipped_self_host` / `skipped_graphics` / `skipped_syslib`） | ✅ 中性 | 只是把"跳过原因"变成数字；`skipped_self` / `skipped_system` / `patched` 三个旧判据一个没动（见 `20261127-N2b-lib-filter-counters.md`） |
 
 ## 约束与坑
 
