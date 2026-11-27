@@ -1,6 +1,6 @@
 # 探针的固定项集合（每行一个 id，排序）。
 # 增删探针项时必须同步本文件：node tools/lint/check-probe-ids.mjs --write
-# 由 tools/lint/check-probe-ids.mjs 校验；总数 99
+# 由 tools/lint/check-probe-ids.mjs 校验；总数 100
 # 来源：probe/src/main/java（J/P/F/D 等）+ probe/src/main/cpp（N 系列，长名带 .后缀）
 D01
 D02
@@ -73,6 +73,7 @@ N12.syscall_getuid
 N13.open_user0_prefix
 N14.readlink_user0_fd
 N15.stat_user0_dir
+N16.libc_maps
 P01
 P02
 P03

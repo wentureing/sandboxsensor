@@ -202,6 +202,38 @@ Java_com_sandbox_probe_NativeProbe_runAll(JNIEnv* env, jclass /*clazz*/, jstring
         }
     }
 
+    // ---- N16 /proc/self/maps 经 libc open/read（应经过容器的 GOT hook）----
+    // 与 N10（fopen 路径）形成对照：容器里 N16 看到的是伪造视图（pkg_hit/nextvm_hit 低），
+    // 直装（无容器）时两者一致。加这一项同时覆盖 native 侧 /proc spoof 的插桩计数。
+    {
+        int mfd = open("/proc/self/maps", O_RDONLY | O_CLOEXEC);
+        if (mfd < 0) {
+            add("N16.libc_maps", false, Errcode("open_maps"));
+        } else {
+            std::string all;
+            char buf[4096];
+            ssize_t n;
+            while ((n = read(mfd, buf, sizeof(buf))) > 0) {
+                all.append(buf, static_cast<size_t>(n));
+            }
+            close(mfd);
+            int lines = 0, pkgHit = 0, nextvmHit = 0;
+            size_t pos = 0;
+            while (pos < all.size()) {
+                size_t e = all.find('\n', pos);
+                if (e == std::string::npos) e = all.size();
+                ++lines;
+                if (!pkg.empty() && all.find(pkg, pos) < e) ++pkgHit;
+                if (all.find("nextvm", pos) < e) ++nextvmHit;
+                pos = e + 1;
+            }
+            char out[256];
+            snprintf(out, sizeof(out), "lines=%d pkg_hit=%d nextvm_hit=%d", lines, pkgHit,
+                     nextvmHit);
+            add("N16.libc_maps", true, out);
+        }
+    }
+
     // ---- N11 目录/写操作组合（很多实现只拦读）----
     {
         const std::string d = dataDir + "/files/n11";
