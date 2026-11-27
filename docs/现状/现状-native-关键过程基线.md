@@ -47,12 +47,20 @@
 | `libs` / `patched` | 415 / 411 | **允许随版本漂移**（加载库集合随 ROM/版本变）；只记量级 |
 | `late_passes` / `late_libs` | 0 / 0 | 启动后无 dlopen；若某 guest 出现非 0，说明运行期加载了新库（正常） |
 | `spoof` / `maps_lines` / `maps_hidden` | 0 / 0 / 0 | **当前为 0 且有解释**（见 §四）；用于"native 读者"场景 |
-| `skipped_self_host` | **待首取** | N2-B 新增：`patch_library_got` 里因路径含 `com.nextvm.app` 被跳过。**不并入** `skipped_self`（后者必须恒为 1） |
-| `skipped_graphics` | **待首取** | N2-B 新增：图形栈六条关键词命中数。`NS_HOOK_SYSTEM_LIBS=1` 时**仍应计数且仍跳过** |
-| `skipped_syslib` | **待首取** | N2-B 新增：`NS_HOOK_SYSTEM_LIBS=0` 下被跳过的其余系统库（与 callback 层的 `skipped_system` 不同义） |
+| `skipped_self_host` | **0**（首取 2026-11-27 / `1.0.0-bdc71c5`） | N2-B 新增：`patch_library_got` 里因路径含 `com.nextvm.app` 被跳过。**不并入** `skipped_self`（后者必须恒为 1） |
+| `skipped_graphics` | **7**（首取同上） | N2-B 新增：图形栈六条关键词命中数。`NS_HOOK_SYSTEM_LIBS=1` 时**仍应计数且仍跳过** |
+| `skipped_syslib` | **404**（首取同上） | N2-B 新增：`NS_HOOK_SYSTEM_LIBS=0` 下被跳过的其余系统库（与 callback 层的 `skipped_system` 不同义） |
 
 > **N2-B 起 `hook stats` 行有 12 个 key**（新增 3 个）。判据：`skipped_self` / `skipped_system` / `patched`
-> 三个**旧判据一律不变**；新字段首次真机取值后回填本表，并同时记录 guest / 三阶段。
+> 三个**旧判据一律不变**（真机实测仍然 1 / 3 / 411）。
+>
+> **首取观察（2026-11-27，`mark.via` 与 `com.sandbox.probe` 相同；bind / +5s / +20s 三拍也相同）**：
+> `skipped_self_host=0`、`skipped_graphics=7`、`skipped_syslib=404`，而 **`7 + 404 + 0 = 411 = patched`**。
+> 即"进入 `patch_library_got` 的 411 个库全部被过滤掉" ⇒ 这两个 guest 进程里
+> **`kAppLib`（应用/沙箱库）命中为 0**，`patched` **不等于**"真的 patch 了几个库"。
+> 该观察同时印证 `20261127-N2a-lib-filter.md` §六 记的"`libs_patched` 语义偏松"，并与 `late_passes=0`（延迟 patch 从未跑）自洽。
+> **待办（N2-C）**：给 `kAppLib` 也加计数（例如 `libs_applied`），把
+> 「扫描 / 过 callback / 过过滤 / 真的 patch」四级数字分开；在那之前**不要**用 `patched` 推断"patch 了多少库"。
 
 ---
 
