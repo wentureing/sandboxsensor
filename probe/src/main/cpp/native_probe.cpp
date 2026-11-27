@@ -15,6 +15,7 @@
 #include <android/log.h>
 
 #include <dirent.h>
+#include <dlfcn.h>
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
@@ -231,6 +232,32 @@ Java_com_sandbox_probe_NativeProbe_runAll(JNIEnv* env, jclass /*clazz*/, jstring
             snprintf(out, sizeof(out), "lines=%d pkg_hit=%d nextvm_hit=%d", lines, pkgHit,
                      nextvmHit);
             add("N16.libc_maps", true, out);
+        }
+    }
+
+    // ---- H1 dlsym 绕过（2026-11-27）----
+    // 容器的 native hook 改的是 PLT/GOT 槽；用 dlsym 拿 libc 真实地址后直接调用应当**绕过**它。
+    // 两种结果都是有效结论：translated=被翻译（说明还有别的层在管）；not-translated=dlsym 绕过（预期）。
+    {
+        typedef int (*open_fn)(const char*, int, ...);
+        open_fn libc_open = reinterpret_cast<open_fn>(dlsym(RTLD_DEFAULT, "open"));
+        const std::string target = dataDir + "/files/native_dlsym.txt";
+        if (libc_open == nullptr) {
+            add("H1.dlsym_bypass", true, "dlsym(open)=null（无法判定）");
+        } else {
+            errno = 0;
+            int fd = libc_open(target.c_str(), O_CREAT | O_RDWR | O_CLOEXEC, 0600);
+            const int e = errno;
+            if (fd >= 0) {
+                close(fd);
+                add("H1.dlsym_bypass", true,
+                    "translated fd>=0 target=" + target +
+                        " -> dlsym 路径也被翻译（说明不只有 GOT 一层）");
+            } else {
+                add("H1.dlsym_bypass", true,
+                    "not-translated errno=" + std::to_string(e) + "(" + strerror(e) +
+                        ") -> GOT patch 不覆盖 dlsym（预期的原理边界）");
+            }
         }
     }
 

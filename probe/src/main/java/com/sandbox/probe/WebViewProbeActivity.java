@@ -314,6 +314,15 @@ public class WebViewProbeActivity extends Activity {
         // v1.19：沙箱 + 有 BOM 的对照文件（W2 是无 BOM 的同一个 body）
         final File fBom = prepareFileRaw("wvprobe_bom.html", HTML_BODY, true);
 
+        // W-ext（2026-11-27）：外部存储两组对照 —— 决定"内容目录迁到外部存储"这条路是否成立。
+        //   为什么用绝对路径而不是 getExternalFilesDir()：容器会把后者映射到沙箱（等于还是内部路径）。
+        //   javaIo 默认关 ⇒ Java 层 File 写的是**真实**外部路径；Chromium 读 file:// 也不经容器 hook。
+        //   私有：/storage/emulated/0/Android/data/com.nextvm.app/files/（自有包，零权限）
+        //   公有：/storage/emulated/0/Download/（依赖 MANAGE_EXTERNAL_STORAGE，当前 appops=allow）
+        final File fExtPriv = prepAt(
+                "/storage/emulated/0/Android/data/com.nextvm.app/files/wvprobe_ext_priv.html");
+        final File fExtPub = prepAt("/storage/emulated/0/Download/wvprobe_ext_pub.html");
+
         loadAndCheck("W1", "about:blank", HTML_BODY, false, () ->
             loadAndCheck("W2", ff1 == null ? "about:blank" : "file://" + ff1.getAbsolutePath(),
                     null, false, () ->
@@ -339,6 +348,14 @@ public class WebViewProbeActivity extends Activity {
                     // W19：被容器重定向的公共目录，测"重定向路径"的 MIME 是否也不同
                     loadAndCheck("W19", f19 == null ? "about:blank"
                             : "file://" + f19.getAbsolutePath(), null, false, () ->
+                    // W-ext-private：外部存储私有目录（真实路径，不在 app dataDir 内）
+                    loadAndCheck("W-ext-private", fExtPriv == null || !fExtPriv.exists()
+                                    ? "about:blank" : "file://" + fExtPriv.getAbsolutePath(),
+                            null, false, () ->
+                    // W-ext-public：外部存储公有目录（Download）
+                    loadAndCheck("W-ext-public", fExtPub == null || !fExtPub.exists()
+                                    ? "about:blank" : "file://" + fExtPub.getAbsolutePath(),
+                            null, false, () ->
                     // v1.19 四组合：把「BOM」这个干扰项控制住
                     //   W2  = 沙箱 + 无 BOM  -> text/plain
                     //   W14 = tmp  + 有 BOM  -> text/html
@@ -361,7 +378,7 @@ public class WebViewProbeActivity extends Activity {
                                                 status.setText("✅ 全部实验完成 —— 可长按下方文字复制");
                                             });
                                         });
-                            }))))))))))));
+                            }))))))))))))));
     }
 
     /**

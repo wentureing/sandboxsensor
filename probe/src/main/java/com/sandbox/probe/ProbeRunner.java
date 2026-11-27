@@ -488,6 +488,21 @@ public final class ProbeRunner {
             File host = new File("/data/data/com.nextvm.app");
             return "exists=" + host.exists() + " canRead=" + host.canRead();
         });
+
+        // X1（2026-11-27）：跨应用启动 —— 容器内 A 打开 B 的最小判据。
+        // 用另一个已装 guest（via）的 LAUNCHER Activity 作为目标；无异常 = 解析并派发成功。
+        // 副作用：本项会真的把 via 拉起来（因此放在 crosspkg 组末尾；不改变其它项结果）。
+        put("X1.cross_guest_start", "crosspkg", "startActivity to another guest", () -> {
+            try {
+                android.content.Intent i = new android.content.Intent();
+                i.setClassName("mark.via", "mark.via.Shell");
+                i.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
+                ctx.startActivity(i);
+                return "dispatched target=mark.via/mark.via.Shell";
+            } catch (Throwable t) {
+                return "THREW " + t.getClass().getSimpleName() + ": " + t.getMessage();
+            }
+        });
     }
 
     // --------------------------------------- Java 系统属性（新大类）
