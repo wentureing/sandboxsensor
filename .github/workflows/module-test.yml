@@ -97,14 +97,19 @@ jobs:
             "$CORE/path_rules.cpp" "$CORE/path_pattern.cpp" "$CORE/path_spoof.cpp" \
             "$TEST/path_spoof_test.cpp" \
             -o /tmp/path_spoof_test
+          # N2-A：库过滤判定表（独立 TU，不依赖 path_rules）
+          g++ -std=c++17 -Wall -Wextra -Werror=return-type -O1 -I "$CORE" \
+            "$CORE/lib_filter.cpp" "$TEST/lib_filter_test.cpp" \
+            -o /tmp/lib_filter_test
 
-      - name: Run golden vectors (shared with Kotlin) + pattern vectors
+      - name: Run golden vectors (path / pattern / spoof / lib-filter)
         working-directory: container
         run: |
           set -euo pipefail
           /tmp/path_rules_test core/hook/src/test/resources/golden/path_vectors.tsv
           /tmp/path_pattern_test
           /tmp/path_spoof_test core/hook/src/test/resources/golden/path_spoof_vectors.tsv
+          /tmp/lib_filter_test core/hook/src/test/resources/golden/lib_filter_vectors.tsv
 
       - name: Verify "(deleted)" suffix length (evidence + regression guard)
         working-directory: sensor
