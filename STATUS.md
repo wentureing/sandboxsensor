@@ -121,6 +121,8 @@ node tools/release/gh-api.mjs --dispatch module-test.yml main ref="baseline-v150
 | **为什么这么设计** | `docs/设计/README.md`；**新增** `设计-native重构与临时适配器.md`（含性能评估/选型）、`设计-process-slot测试分层与matrix.md` |
 | **现在什么生效** | `docs/现状/README.md`、`现状-容器能力清单与回归方法.md`、**新增 `现状-native-关键过程基线.md`**、`现状-容器自测覆盖矩阵.md` |
 | **native 全景（描述+计划一张表）** | **`docs/现状/现状-native全景与计划台账.md`**（2026-11-27 整理：代码事实、生效面、缺口、R2/N1a 状态、旧文档过时清单） |
+| **hook 摸底 / 能力边界 / 功能使用频次** | **`docs/现状/现状-hook摸底与能力边界.md`**（9 类 hook、IO 八条缺陷、L3 欺骗代价、"一层全骗"只有 seccomp 可行、真机频次与未使用清单） |
+| **下一步路线（可运行优先 + 欺骗可选）** | **`docs/计划/计划-可运行优先与C-dual.md`**（C-dual 真路径、`EnvSampler` 采样层、L0–L3 欺骗分级、MT 文件管理为第一验收） |
 | **接下来做什么** | `docs/计划/README.md`；**新增** `计划-重构阶段任务总表.md`（R1–R4 + DoD）、`计划-native-N1a-path-spoof.md`、`计划-多实例支持缺口清单.md`；旧有 `计划-B4-4剩余批次边界.md`、`计划-启动链已知缺陷（重构后修复）.md` |
 | **做过什么/证据** | `docs/输出/变更/20261127-process-slots-会话复用与UI解绑.md`、`docs/输出/记录/记录-诊断通道与零代码调试手段.md`、`docs/输出/探针-检测项清单.md` |
 | 哪些结论是错的 | `docs/archive/错误结论-2026-11/README.md` |
