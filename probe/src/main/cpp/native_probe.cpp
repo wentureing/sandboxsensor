@@ -241,22 +241,26 @@ Java_com_sandbox_probe_NativeProbe_runAll(JNIEnv* env, jclass /*clazz*/, jstring
     {
         typedef int (*open_fn)(const char*, int, ...);
         open_fn libc_open = reinterpret_cast<open_fn>(dlsym(RTLD_DEFAULT, "open"));
-        const std::string target = dataDir + "/files/native_dlsym.txt";
+        // 注意：dataDir 在第 2 轮会变成**容器真实 dataDir**（/data/data/com.nextvm.app），
+        // 该路径真实存在 ⇒ open 必然成功 ⇒ 会把"没被翻译"误报成"被翻译"。
+        // 所以判定用 guest 包名拼死路径，并优先用它（dataDir 仅作兜底展示）。
+        const std::string probe_target = "/data/data/" + pkg + "/files/native_dlsym.txt";
         if (libc_open == nullptr) {
             add("H1.dlsym_bypass", true, "dlsym(open)=null（无法判定）");
         } else {
             errno = 0;
-            int fd = libc_open(target.c_str(), O_CREAT | O_RDWR | O_CLOEXEC, 0600);
+            int fd = libc_open(probe_target.c_str(), O_CREAT | O_RDWR | O_CLOEXEC, 0600);
             const int e = errno;
             if (fd >= 0) {
                 close(fd);
                 add("H1.dlsym_bypass", true,
-                    "translated fd>=0 target=" + target +
+                    "translated fd>=0 target=" + probe_target +
                         " -> dlsym 路径也被翻译（说明不只有 GOT 一层）");
             } else {
                 add("H1.dlsym_bypass", true,
                     "not-translated errno=" + std::to_string(e) + "(" + strerror(e) +
-                        ") -> GOT patch 不覆盖 dlsym（预期的原理边界）");
+                        ") target=" + probe_target +
+                        " -> GOT patch 不覆盖 dlsym（预期的原理边界）");
             }
         }
     }
