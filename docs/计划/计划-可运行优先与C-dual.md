@@ -39,6 +39,11 @@ guest API 调用 ─────────┤
 | --- | --- | --- | --- |
 | **报告类** | `ApplicationInfo.dataDir`/`sourceDir`、`PackageInfo`、`getPackageInfo()` 的字段 | 合成 | 现状已是合成（`syntheticDataDir`/`pathFidelity`） |
 | **打开类** | `getFilesDir()`/`getCacheDir()`/`getExternalFilesDir()`/`getDatabasePath()` 的**实际 I/O** | 真路径 | 已有开关 `VirtualContext.contentPathsUseReal`（默认 false）+ `PathWhitelistEffectTest` |
+
+> **⚠ WebView 专用约束（2026-11-27 实测）**：给 **WebView 的 `file://`** 用的内容目录**不能**放在
+> `getFilesDir()` 或 `getExternalFilesDir()` —— 两者都落在"app data 区"（内部 `/data/user/0/<pkg>/` 或外部 `Android/data/<pkg>/`），
+> Chromium 会走内容嗅探 ⇒ `text/plain`。必须放**共享存储的非 app-data 目录**（`/storage/emulated/0/<自建目录>/`），
+> 证据见 `记录-20261127-探针新增项实测.md` §3.2（W-ext-private=`text/plain`，W-ext-public=`text/html`）。
 | **guest 自己拼路径** | `getOpPackageName()` 拼 `/storage/emulated/0/Android/data/<host>/…` | 兜底 hook（GOT / `javaIo`） | 现状靠 hook；C-dual 后降级为"可选兜底" |
 
 **关键切换**：`contentPathsUseReal` 从"实验开关"逐步升级为**默认 true**（按 guest 分批），

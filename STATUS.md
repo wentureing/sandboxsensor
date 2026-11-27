@@ -81,6 +81,9 @@
 | 11 | 探针报告 `106` 条 / `99` 唯一 id | `ContentProvider.onCreate` 与 `Activity.onCreate` 各跑一轮 → `N11..N16`、`P28` 重复；首轮处于早期窗口故 N 系列首轮 fail。合并时按 id 去重或 provider 阶段不跑 native 项 |
 | 12 | `P25/P26` 取样时机 | `UiProbe` 在 `ProbeActivity.onCreate` 跑，`P27` 同时显示 `token=false attached=false` → `BadTokenException`。改到 `onWindowFocusChanged`/`onResume` 之后再跑（探针侧改动） |
 | 13 | `(deleted)` 后缀剥离 **已修（2026-11-27）** | 上游 fork 前遗留（`a1871a6`/`e590c32`，woand）：长度手写 11（实际 10）⇒ 剥离永不生效 ⇒ maps 里带该后缀的 guest apk 行被整行丢弃（实测零触发）。已改为 `kDeletedSuffixLen`（`sizeof - 1`，两处共用）+ 3 条向量 + 3 条不变量 + CI 静态守卫。见 `docs/输出/变更/20261127-deleted-suffix-11to10.md` |
+| 14 | **`Runtime.nativeLoad` hook 从未装成功**（待诊断） | 上游 `7cdcf01` 就有（本意修 CheckJNI null caller 崩溃），但 logcat/debug-trace 无 `SUCCESS` 痕迹。批 3 先补"失败分支落盘"，不直接修 |
+| 15 | **5 个 JNI 导出无调用方**（待清理） | `nativeGetRecent`/`nativeClearRecent`/`nativeGetStats`/`nativeResetStats`/`nativeInstall`；`check-jni-contract` 一直提示，批 3 删除 |
+| 16 | **slot 释放误杀**（未复现，待观测） | 派发 `P1$Standard00` 后 `checks.log` 记 `S slot released stubs slot=1 killed=1/1` ⇒ Activity 未进 `onCreate`（首次 W-ext 失败的根因）。批 3 先加 slot 生命周期观测 |
 
 ---
 
