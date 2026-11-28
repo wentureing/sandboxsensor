@@ -26,6 +26,20 @@
 
 ---
 
+## 一之二、G3 库级白名单（2026-11-28 落地，管理器下发）
+
+| 事项 | 结论 |
+| --- | --- |
+| **配置通路** | 由 `NativeHookBridge.setupLibAllow(pkg, libs, syms)` 在 **bind 前**下发（JNI `nativeSetLibAllow`），**不读系统属性** —— guest 不该读容器配置 |
+| **决策** | `pkgAllow` 命中且 `libAllow` 命中 ⇒ 即使被判为系统库也 patch，但只 patch `symAllow` 的符号（默认 `open/openat/stat/access/readlink`） |
+| **匹配语义** | 库名用 `list_matches`（短库名出现在长路径里）；符号用 `list_exact`（`open` ⊄ `openat`）—— 两者都在 `core/lib_filter`，**host 可测** |
+| **时序** | 系统库在 Zygote 阶段已映射，配置在 bind 时才下发 ⇒ `g_skipped_libs` 记录被跳过的库，`repatch_loaded_libs()` 在下发后重评 |
+| **默认值** | `LibAllowDefaults`：`PKG_ALLOW={mark.via}`、`LIB_ALLOW={libjavacore}`、`SYM_ALLOW={5 个}`；空集合 = 不启用 = 零行为变化 |
+| **验证** | `H2.lib_allow_applied`（探针）：期望读 `<instance>/files/lib-allow.json`，实际读容器 `hook stats`；`applied==0` 且期望非空 ⇒ fail |
+
+**为什么只对 `libjavacore`**：诊断模式（`applied=50`）实测 24 条读记录中 22 条来自 `libjavacore.so`（`who=`），
+且它在 guest 进程内（多进程模型）⇒ 只 patch 它的 5 个符号即可，远小于全量的 50 库。
+
 ## 二、已证伪 / 不要再试
 
 | 路线 | 为什么 |
