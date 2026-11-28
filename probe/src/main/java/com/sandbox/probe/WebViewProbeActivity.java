@@ -333,6 +333,9 @@ public class WebViewProbeActivity extends Activity {
         final File fSynthPath = prepAt("/data/user/0/com.sandbox.probe/files/wvprobe_synth.html");
         // ① 发起路径 = 真实路径 + **guest 包名** —— 检验嗅探是否只针对宿主包名
         final File fGuestPkg = prepAt("/storage/emulated/0/vsandbox/com.sandbox.probe/wvprobe_gp.html");
+        // W-big（2026-11-28）：真实路径 + 8MB 大文件 —— 读取成功且耗时，宿主可用 /proc/<pid>/fd
+        // 轮询抓到"谁在读"，从而定位读取发生在容器进程的哪个库。
+        final File fBig = prepareBig("/storage/emulated/0/vsandbox/wvprobe_big.html", 8);
 
         loadAndCheck("W1", "about:blank", HTML_BODY, false, () ->
             loadAndCheck("W2", ff1 == null ? "about:blank" : "file://" + ff1.getAbsolutePath(),
@@ -383,6 +386,10 @@ public class WebViewProbeActivity extends Activity {
                     loadAndCheck("W-ext-guestpkg", fGuestPkg == null || !fGuestPkg.exists()
                                     ? "about:blank" : "file://" + fGuestPkg.getAbsolutePath(),
                             null, false, () ->
+                    // W-big：8MB 真实路径 → 读取耗时，宿主轮询 /proc/<pid>/fd 定位读取者
+                    loadAndCheck("W-big", fBig == null || !fBig.exists()
+                                    ? "about:blank" : "file://" + fBig.getAbsolutePath(),
+                            null, false, () ->
                     // v1.19 四组合：把「BOM」这个干扰项控制住
                     //   W2  = 沙箱 + 无 BOM  -> text/plain
                     //   W14 = tmp  + 有 BOM  -> text/html
@@ -405,7 +412,7 @@ public class WebViewProbeActivity extends Activity {
                                                 status.setText("✅ 全部实验完成 —— 可长按下方文字复制");
                                             });
                                         });
-                            }))))))))))))))))));
+                            })))))))))))))))))));
     }
 
     /**
@@ -459,6 +466,31 @@ public class WebViewProbeActivity extends Activity {
             rec("PREP " + name + " FAIL: " + t);
             return null;
         }
+    }
+
+    /** W-big 用：写 ~mb MB 的 HTML 到指定绝对路径（真实路径，供 fd 轮询定位读取者） */
+    private File prepareBig(String absPath, int mb) {
+        File f = new File(absPath);
+        try {
+            File dir = f.getParentFile();
+            if (dir != null) dir.mkdirs();
+            FileOutputStream o = new FileOutputStream(f, false);
+            o.write("<!DOCTYPE html><html><body><h1>BIG_OK</h1>".getBytes("UTF-8"));
+            byte[] chunk = new byte[8192];
+            java.util.Arrays.fill(chunk, (byte) 'x');
+            long target = mb * 1024L * 1024L;
+            long written = 0;
+            while (written < target) {
+                o.write(chunk);
+                written += chunk.length;
+            }
+            o.write("</body></html>".getBytes("UTF-8"));
+            o.close();
+            rec("PREP BIG " + absPath + " OK exists=" + f.exists() + " len=" + f.length());
+        } catch (Throwable t) {
+            rec("PREP BIG " + absPath + " FAIL " + t.getClass().getSimpleName() + ": " + t.getMessage());
+        }
+        return f;
     }
 
     /** W18/W19 用：把 HTML 写到指定绝对路径；失败也返回 File，便于后续观察 exists/len */
