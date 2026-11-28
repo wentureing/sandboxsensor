@@ -41,17 +41,24 @@ struct LibFilterConfig {
 };
 ```
 
-**决策顺序（白名单优先于黑名单 —— 用户明确要求）**：
+**决策顺序（2026-11-28 修正：`pkg` 整体先于 `lib`）**：
 
 ```
-1) lib 命中 lib_deny 且 未命中 lib_allow           → SKIP（黑名单默认）
-2) lib 命中 lib_allow
-     a) pkg_allow 为空                              → PATCH（全局白名单）
-     b) 当前 pkg ∈ pkg_allow                        → PATCH（**白名单覆盖黑名单**）
-     c) 否则                                        → SKIP（白名单只对指定包生效）
-3) 当前 pkg ∈ pkg_deny                             → SKIP（整包禁掉，排查用）
-4) 其余 → 现行四级判据（self → graphics → app → system[NS_HOOK_SYSTEM_LIBS]）
+0) lib_name == nullptr → 不过滤（保持现状：照常 patch）
+1) pkg ∈ pkg_deny                    → SKIP           ← 整包豁免，最高优先级
+2) pkg ∈ pkg_allow:                                   ← 先定"这个包走哪套规则"
+     a) lib ∈ lib_allow               → PATCH          ← 白名单可覆盖 lib_deny
+     b) lib ∈ lib_deny                → SKIP
+     c) 其他                          → 常规四级判据（app 库 patch / 系统库按 NS_*）
+3) pkg 未列入任何包表:
+     a) lib ∈ lib_deny                → SKIP           ← 全局默认仍禁危险库
+     b) 其他                          → 常规四级判据
+     （lib_allow 不在此生效：白名单必须包级限定，避免"一处加白名单、全容器放大"）
 ```
+
+**为什么 `pkg` 必须先于 `lib`**：`pkg_allow` 存在的意义是"限定作用域"。若先判 `lib`，
+一个 `lib_allow` 条目就会对所有 guest 生效（等于变相打开 `NS_HOOK_SYSTEM_LIBS`）；先判 `pkg` 后，
+"via 里 patch WebView 库"与"其他 guest 完全不受影响"可以同时成立。
 
 **关键点**：
 - `lib_deny` 把现在**硬编码的图形栈六条 + callback 层那五项**收进来（数据化，可审计）；
@@ -135,7 +142,44 @@ struct LibFilterConfig {
 
 ---
 
-## 九、需要你确认的 3 点
+## 八之二、权威源码与解包结论（2026-11-28 取证）
+
+### 1) bionic `link.h`（AOSP 主干，权威）
+
+`struct dl_phdr_info` 里 **`dlpi_adds` / `dlpi_subs`** 的定义（原文要点）：
+
+- `dlpi_adds` = "The total number of **library load events** at the time `dl_iterate_phdr()` was called"
+- `dlpi_subs` = 同理，unload 事件
+- **仅 API level 30+**；用回调的 `size` 参数判断能否读到这几个字段
+- 源码：<https://raw.githubusercontent.com/aosp-mirror/platform_bionic/main/libc/include/link.h>
+
+⇒ **方案 C（`dlpi_adds` 轮询）有官方依据**；旧版本（<30）回退定时触发。
+同时头文件里 `struct r_debug` 的注释是 **"Used by the dynamic linker to communicate with the debugger"**，
+`r_brk` 是调试器 rendezvous ⇒ **方案 D 会干扰调试器**（加固壳若用反调试会立刻发现），这一条也坐实。
+
+### 2) Chromium `net/base/mime_sniffer.cc`（权威）
+
+- 嗅探的判据是**魔数表**（`CheckForMagicNumbers`），HTML 文本没有魔数 ⇒ 嗅探不出 `text/html`；
+- 文件头注释明确"HTML payload **with no Content-Type** ⇒ render as HTML"（浏览器默认），
+  但"无魔数 ⇒ 嗅探返回 null ⇒ 上层用默认值"这条路径会落到 `text/plain`。
+- 源码：<https://raw.githubusercontent.com/chromium/chromium/main/net/base/mime_sniffer.cc>
+
+⇒ 与实测完全一致：**嗅探不出 HTML ⇒ `text/plain`**；**按扩展名**（`net::GetMimeTypeFromFile`）才得到 `text/html`。
+> **仍未确认的机制**：为什么"URL 含宿主包名"会走嗅探分支（而不含则按扩展名）。
+> 这属 WebView（`android_webview/`）的 file-access 策略，未取到权威源码；
+> 但**规律本身有 9 组实测**（见 `主题/册-WebView与file-MIME.md`），设计按规律走、机制标注"未确认"。
+
+### 3) 解包结论（少拆：只看目录与关键文件）
+
+| 对象 | 结论 |
+| --- | --- |
+| **via APK**（2 628 334 B，364 条目） | **无 `lib/` 目录 ⇒ 纯 Java，无 native 库**（这解释了 `applied=0`）；`assets/` 只有 `error.html` / `logo.svg` / `opensug2.js` / `simple.txt` / `dexopt/*`；**首页 HTML 不在 assets**（运行时写到 `getFilesDir()` 再由 `file://` 加载） |
+| **WebView APK** | `/product/app/WebViewGoogle64/WebViewGoogle64.apk`（**74.5 MB**），`lib/arm64-v8a/` **未解压** ⇒ 库路径形如 `…WebViewGoogle64.apk!/lib/arm64-v8a/libwebviewchromium.so` |
+| 包/版本 | `com.google.android.webview` 126.0.6478.71（`dumpsys webviewupdate`） |
+
+⇒ 设计含义：
+- `lib_allow` 用**子串** `libwebviewchromium` 即覆盖 `.so` 与 `_plat_support`（不同 ROM 命名差异靠子串吸收）；
+- 该库路径含 **`/product/app/`**（不是 `/data/app/`）⇒ 当前 `classify_lib` 判为 `system_lib` 并跳过 —— **正是要白名单化的对象**。
 
 1. **初始 `lib_allow` 清单**：`libwebviewchromium` / `libwebviewchromium_plat_support` / `libmonochrome` —— 是否够？本机是 `com.google.android.webview 126.0.6478.71`（`/product/app/WebViewGoogle64/`）。
 2. **`pkg_allow` 是否只放 `mark.via`**（探针 `com.sandbox.probe` 不加，作为反向判据）。
