@@ -909,6 +909,11 @@ public final class ProbeRunner {
             if (libAllow.isEmpty()) {
                 return "SKIPPED (libAllow empty)";
             }
+            String pkgAllow = eo.optString("pkgAllow", "");
+            if (!pkgAllow.isEmpty() && !pkgAllow.contains(ctx.getPackageName())) {
+                // 本 guest 不在白名单里 ⇒ applied=0 是正确行为，不能判 fail
+                return "SKIPPED (self " + ctx.getPackageName() + " not in pkgAllow=" + pkgAllow + ")";
+            }
             File stats = new File("/data/user/0/com.nextvm.app/files/debug-trace.log");
             if (!stats.canRead()) {
                 return "SKIPPED (container log unreadable)";
@@ -982,15 +987,15 @@ public final class ProbeRunner {
                     putSkipped(id, "native", id);
                     continue;
                 }
-                JSONObject o = new JSONObject();
-                o.put("id", id);
-                o.put("group", "native");
-                o.put("name", id);
-                o.put("value", value);
-                o.put("status", "ok".equals(status) ? "ok" : "fail");
-                synchronized (sink.entries) {
-                    sink.entries.put(o);
-                }
+                // 走 Report.put：与其它项共用同一条去重/写入路径（T-2）
+                final String fVal = value;
+                final boolean fOk = "ok".equals(status);
+                Report.put(sink.entries, id, "native", id, () -> {
+                    if (!fOk) {
+                        throw new IllegalStateException(fVal);
+                    }
+                    return fVal;
+                });
             }
         } catch (Throwable t) {
             put("N00", "native", "runAll", () -> {
