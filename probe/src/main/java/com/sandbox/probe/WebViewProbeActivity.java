@@ -328,6 +328,11 @@ public class WebViewProbeActivity extends Activity {
         final File fExtShared = prepAt("/storage/emulated/0/com.nextvm.app/wvprobe_ext_shared.html");
         // W-ext-nopkg（第四组）：路径**不含包名**的自建目录 —— 验证"含包名才走嗅探"这个新规律
         final File fExtNoPkg = prepAt("/storage/emulated/0/vsandbox/wvprobe_ext_nopkg.html");
+        // 2026-11-27 三段式：① 发起路径 = 合成（guest 形状）路径 —— 检验第②段（容器翻译）在 file:// 上是否有效
+        // 注意：guest 视角写这里 = 容器把它翻译到沙箱；Chromium 读它时不经容器 hook ⇒ 预期读不到
+        final File fSynthPath = prepAt("/data/user/0/com.sandbox.probe/files/wvprobe_synth.html");
+        // ① 发起路径 = 真实路径 + **guest 包名** —— 检验嗅探是否只针对宿主包名
+        final File fGuestPkg = prepAt("/storage/emulated/0/vsandbox/com.sandbox.probe/wvprobe_gp.html");
 
         loadAndCheck("W1", "about:blank", HTML_BODY, false, () ->
             loadAndCheck("W2", ff1 == null ? "about:blank" : "file://" + ff1.getAbsolutePath(),
@@ -370,6 +375,14 @@ public class WebViewProbeActivity extends Activity {
                     loadAndCheck("W-ext-nopkg", fExtNoPkg == null || !fExtNoPkg.exists()
                                     ? "about:blank" : "file://" + fExtNoPkg.getAbsolutePath(),
                             null, false, () ->
+                    // W-ext-synthpath：发起路径 = 合成（guest 形状）路径 → 测第②段（容器翻译）在 file:// 上是否有效
+                    loadAndCheck("W-ext-synthpath", fSynthPath == null || !fSynthPath.exists()
+                                    ? "about:blank" : "file://" + fSynthPath.getAbsolutePath(),
+                            null, false, () ->
+                    // W-ext-guestpkg：真实路径 + guest 包名 → 测嗅探是否只针对宿主包名
+                    loadAndCheck("W-ext-guestpkg", fGuestPkg == null || !fGuestPkg.exists()
+                                    ? "about:blank" : "file://" + fGuestPkg.getAbsolutePath(),
+                            null, false, () ->
                     // v1.19 四组合：把「BOM」这个干扰项控制住
                     //   W2  = 沙箱 + 无 BOM  -> text/plain
                     //   W14 = tmp  + 有 BOM  -> text/html
@@ -392,7 +405,7 @@ public class WebViewProbeActivity extends Activity {
                                                 status.setText("✅ 全部实验完成 —— 可长按下方文字复制");
                                             });
                                         });
-                            }))))))))))))))));
+                            }))))))))))))))))));
     }
 
     /**

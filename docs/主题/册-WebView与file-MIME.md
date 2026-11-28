@@ -23,6 +23,34 @@
 
 ---
 
+## 一之二、必须分清的三段（2026-11-27 修订）
+
+之前把问题笼统说成"guest 看到的路径"，这是不准确的。`file://` 的 MIME 取决于**三段**里的第三段，而容器只能在第二段插手：
+
+| 段 | 定义 | 举例 | 谁能改 |
+| --- | --- | --- | --- |
+| **① 发起路径** | guest 代码拼出来、交给 `WebView.loadUrl()` 的那个 URL 字符串 | `file://` + `getFilesDir()` + `/homepage2.html` | guest 自己（我们只能改 `getFilesDir()` 的返回值） |
+| **② 中间转换（隐含）** | WebView/Chromium 解析 URL 到"真正去读哪个文件"的过程里，容器**还能不能插手** | 沙箱路径要不要翻译？`/sdcard` 要不要重定向？ | 容器（路径规则 / hook）——**但对 Chromium 内部读取无效**（`libwebviewchromium.so` 不 patch） |
+| **③ 接受路径** | Chromium 实际 `open()` 的文件路径，**MIME 判定看的是它** | `/data/user/0/com.nextvm.app/files/virtual/.../x.html` | 不由我们直接控制 |
+
+**关键结论（据此重排设计）**：
+
+- 第 ② 段对 **`file://` 几乎无效**：Chromium 直接读文件系统，**不经过容器的 GOT patch**（`libwebviewchromium` 在"永不 patch 的图形栈/系统库"之列），
+  所以"合成路径 → 容器翻译成沙箱"这条路**在 `file://` 上不成立**（文件读不到，或读到的是真实路径）；
+- 因此**能选的只有第 ① 段**：让 guest 拿到的路径本身就是"真实存在、且形态合适"的路径；
+- 而"形态合适"的判据 = 第 ③ 段不含**宿主包名**（含了就走嗅探）。
+
+### 待验证的 4 个实验（决定"能不能像真机"）
+
+| 实验 | ① 发起路径 | 要看什么 | 若结果是这样，含义 |
+| --- | --- | --- | --- |
+| `W-ext-synthpath` | `file:///data/user/0/com.sandbox.probe/files/wv_synth.html`（**合成/guest 形状**） | 能否读到（`EMPTY`/`ERR_FILE_NOT_FOUND` vs 正常） | 读不到 ⇒ 第②段确实无效，**"像真机"不可行** |
+| `W-ext-guestpkg` | `file:///storage/emulated/0/vsandbox/com.sandbox.probe/wv_gp.html`（**真实路径 + guest 包名**） | `contentType` | `text/html` ⇒ 嗅探只针对**宿主**包名，"像真机命名"可行；`text/plain` ⇒ 任何含包名都不行 |
+| （已有）`W2` | 沙箱真路径（含**宿主**包名） | `text/plain` | 宿主包名触发嗅探 |
+| （已有）`W-ext-nopkg` | `/storage/emulated/0/vsandbox/wv.html`（无包名） | `text/html` | 无包名 ⇒ 按扩展名 ✅ |
+
+---
+
 ## 二、已证伪的路线（不要再试）
 
 | 路线 | 为什么不行 | 证据 |
