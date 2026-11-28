@@ -44,8 +44,20 @@
 
 | 实验 | ① 发起路径 | 要看什么 | 若结果是这样，含义 |
 | --- | --- | --- | --- |
-| `W-ext-synthpath` | `file:///data/user/0/com.sandbox.probe/files/wv_synth.html`（**合成/guest 形状**） | 能否读到（`EMPTY`/`ERR_FILE_NOT_FOUND` vs 正常） | 读不到 ⇒ 第②段确实无效，**"像真机"不可行** |
-| `W-ext-guestpkg` | `file:///storage/emulated/0/vsandbox/com.sandbox.probe/wv_gp.html`（**真实路径 + guest 包名**） | `contentType` | `text/html` ⇒ 嗅探只针对**宿主**包名，"像真机命名"可行；`text/plain` ⇒ 任何含包名都不行 |
+| `W-ext-synthpath` | `file:///data/user/0/com.sandbox.probe/files/wv_synth.html`（**合成/guest 形状**） | 结果：**`about:blank` / `EMPTY`**（`f.exists()=false`） | ✅ **已测**：合成路径在真实文件系统里不存在 ⇒ 第②段（容器翻译）**对 `file://` 无效** ⇒ "像真机"必须靠 inline hook |
+| `W-ext-guestpkg` | `file:///storage/emulated/0/vsandbox/com.sandbox.probe/wv_gp.html`（**真实路径 + guest 包名**） | 结果：**`text/html`** ✅ | ✅ **已测**：嗅探只针对**宿主包名**；**guest 包名可以出现在路径里**，不会触发嗅探 |
+
+**规律（2026-11-28 实测后精确化）**：
+
+> `file://` 走内容嗅探的条件是 URL 里含 **宿主包名**（`com.nextvm.app`）；
+> **不含任何包名**或**只含 guest 包名** ⇒ 按扩展名 ⇒ `text/html`。
+
+| 9 组实测 | 路径含 | 结果 |
+| --- | --- | --- |
+| W2 / W-ext-private / W-ext-shared | **宿主包名** | `text/plain` |
+| W14 / W19 / W-ext-public / W-ext-nopkg | 无包名 | `text/html` |
+| **W-ext-guestpkg** | **guest 包名** | **`text/html`** ✅ |
+| **W-ext-synthpath** | 合成路径（真实不存在） | **读不到**（`about:blank`） |
 | （已有）`W2` | 沙箱真路径（含**宿主**包名） | `text/plain` | 宿主包名触发嗅探 |
 | （已有）`W-ext-nopkg` | `/storage/emulated/0/vsandbox/wv.html`（无包名） | `text/html` | 无包名 ⇒ 按扩展名 ✅ |
 
@@ -69,6 +81,14 @@
 权限     = MANAGE_EXTERNAL_STORAGE（当前 appops=allow；干净安装会重置，脚本重授）
 不改动   = WebView 内部、WebViewClient、AssetLoader、内置 WebView —— 一律不需要
 副作用   = 路径不含容器包名 ⇒ 对 guest 的暴露面反而更小
+```
+
+**2026-11-28 实测后的最终形态**（`W-ext-guestpkg` 证明 guest 包名可出现在路径里）：
+
+```
+内容目录 = /storage/emulated/0/vsandbox/<guest包名或instance>/     ← 含 guest 包名也不触发嗅探（实测）
+           ❌ 不能用含宿主包名（com.nextvm.app）的任何路径（内部/外部/自建目录都不行）
+           ❌ 不能用合成路径（/data/user/0/<guest>/…）：真实文件系统里不存在，Chromium 读不到
 ```
 
 **待实现**：容器把 guest 的内容目录（`getFilesDir`/`getExternalFilesDir` 的落点，或仅 WebView 用的内容目录）指到
