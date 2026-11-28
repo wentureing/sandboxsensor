@@ -63,6 +63,34 @@
 
 ---
 
+## 一之三、javaIo 实验（2026-11-28）：写被翻译、读没有
+
+把 `debug.nextvm.javaIo` 打开（`javaIo=true`，`[Dbg/javaIo] installed=true translate=true`）后重跑 W 系列：
+
+| 实验 | 结果 | 含义 |
+| --- | --- | --- |
+| `PREP /data/user/0/com.sandbox.probe/files/wvprobe_synth.html` | **`OK exists=true`** | **写**被 javaIo 翻译到沙箱 ✓ |
+| `W-ext-synthpath` | `text/html`，body = **`net::ERR_FILE_NOT_FOUND`** | **读**没被翻译（合成路径在真实文件系统不存在）✗ |
+| `W2`（沙箱真路径） | `text/plain`（不变） | 路径真实 ⇒ 读得到；MIME 仍受宿主包名影响 |
+| `W-ext-guestpkg` / `nopkg` | `text/html`（不变） | 与 javaIo 无关（真实路径） |
+
+**由此定位"读取者"**（三层都排除了）：
+
+| 候选 | 排除证据 |
+| --- | --- |
+| Java 层（`Linux.open` 等 16 方法） | `[Dbg/javaIo] recent opens` 共 21 条，**没有一条**是 `wvprobe_synth.html` |
+| 被 patch 的 app 库（`libprobe.so`） | `applied=1 slots=12` 只覆盖探针自己的库；探针没读该文件 |
+| 容器进程内的两个 webview 小库 | `readelf -rW` 显示 `libwebviewchromium_plat_support.so`（23 KB）与 `libwebviewchromium_loader.so`（14 KB）**没有 `open/stat/access` 重定位项** |
+
+⇒ **读取者是容器进程内的某个系统库（native `open`）**，正好落在 GOT patch 的默认跳过区（`skipped_syslib=404`）。
+这也是为什么"W2 能读到（真实路径）但 `synthpath` 读不到（不存在）"——读取者不做路径翻译。
+
+**结论（对"guest 假路径 + WebView 真路径"的判定）**：
+
+- 缺的能力**不是** GOT 白名单（目标库不在容器进程）、**不是** inline hook（同因）、**也不是** javaIo（读不走它）；
+- 缺的是**"读取那一层的翻译"**：必须先定位是哪个系统库在读（下一步：大文件 + `/proc/<pid>/fd` 轮询），才能决定给它开白名单；
+- 另一方面 **MIME 已确认按 URL 扩展名判定**（`synthpath` 得到 `text/html`，即使读取失败）⇒ 只要读取被翻译，"像真机路径 + 正常渲染"就能同时成立。
+
 ## 二、已证伪的路线（不要再试）
 
 | 路线 | 为什么不行 | 证据 |
