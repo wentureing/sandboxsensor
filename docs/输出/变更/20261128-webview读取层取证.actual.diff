@@ -1,0 +1,127 @@
+diff --git a/core/hook/src/main/cpp/native-hook.cpp b/core/hook/src/main/cpp/native-hook.cpp
+index e558b37..c60e6ca 100644
+--- a/core/hook/src/main/cpp/native-hook.cpp
++++ b/core/hook/src/main/cpp/native-hook.cpp
+@@ -73,6 +73,7 @@
+ #include <pthread.h>
+ #include <setjmp.h>
+ #include <sys/syscall.h>
++#include <sys/system_properties.h>
+ #include <android/dlext.h>
+ 
+ #ifndef SYS_memfd_create
+@@ -559,6 +560,37 @@ static int make_proc_spoof_fd(ProcSpoofKind kind, const char* src_path = nullptr
+ /**
+  * Hooked open() — redirects file paths to sandbox, hides paths.
+  */
++// ---- 临时取证（2026-11-28）：定位 WebView 的读取者 ----
++// 仅在 NS_HOOK_OPEN_DIAG=1 的诊断构建里使用：记录"谁 open 了 wvprobe 文件"。
++// 日志用 raw syscall 写，避免递归进 hook；路径过滤用 strstr，常规 I/O 只多两次比较。
++// 运行时开关：debug.nextvm.openDiag=1（诊断后关闭；不设编译宏，避免改 CMake）
++static bool ns_open_diag_enabled() {
++    static int cached = -1;
++    if (cached < 0) {
++        char v[PROP_VALUE_MAX] = {0};
++        __system_property_get("debug.nextvm.openDiag", v);
++        cached = (v[0] == '1') ? 1 : 0;
++    }
++    return cached != 0;
++}
++static void diag_caller(void* ret_addr, char* buf, size_t len);
++static void wv_read_trace(const char* fn, const char* path, int fd, int err) {
++    if (path == nullptr) return;
++    if (strstr(path, "wvprobe") == nullptr) return;
++    char who[128] = "?";
++    diag_caller(__builtin_return_address(0), who, sizeof(who));
++    char line[640];
++    int n = snprintf(line, sizeof(line), "%s pid=%d tid=%d fd=%d err=%d who=%s path=%s\n",
++                     fn, getpid(), gettid(), fd, err, who, path);
++    if (n <= 0) return;
++    int f = static_cast<int>(syscall(SYS_openat, AT_FDCWD,
++            "/data/user/0/com.nextvm.app/files/webview-read.log",
++            O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC, 0644));
++    if (f < 0) return;
++    syscall(SYS_write, f, line, static_cast<size_t>(n));
++    syscall(SYS_close, f);
++}
++
+ static int hooked_open(const char* path, int flags, ...) {
+     // Check hidden paths
+     if (is_path_hidden(path)) {
+@@ -590,9 +622,13 @@ static int hooked_open(const char* path, int flags, ...) {
+         va_start(args, flags);
+         mode_t mode = static_cast<mode_t>(va_arg(args, int));
+         va_end(args);
+-        return real_open(actual_path, flags, mode);
++        int r = real_open(actual_path, flags, mode);
++        wv_read_trace("open", path, r, r < 0 ? errno : 0);
++        return r;
+     }
+-    return real_open(actual_path, flags);
++    int r = real_open(actual_path, flags);
++    wv_read_trace("open", path, r, r < 0 ? errno : 0);
++    return r;
+ }
+ 
+ /**
+@@ -626,9 +662,13 @@ static int hooked_openat(int dirfd, const char* path, int flags, ...) {
+         va_start(args, flags);
+         mode_t mode = static_cast<mode_t>(va_arg(args, int));
+         va_end(args);
+-        return real_openat(dirfd, actual_path, flags, mode);
++        int r = real_openat(dirfd, actual_path, flags, mode);
++        wv_read_trace("openat", path, r, r < 0 ? errno : 0);
++        return r;
+     }
+-    return real_openat(dirfd, actual_path, flags);
++    int r = real_openat(dirfd, actual_path, flags);
++    wv_read_trace("openat", path, r, r < 0 ? errno : 0);
++    return r;
+ }
+ 
+ /**
+@@ -1741,7 +1781,12 @@ static void patch_library_got(uintptr_t base_addr, const char* lib_name,
+             default:
+                 break;
+         }
+-        if (verdict.decision == nextvm::libfilter::Decision::kSkip) return;
++        if (verdict.decision == nextvm::libfilter::Decision::kSkip) {
++            // 诊断构建（NS_HOOK_OPEN_DIAG=1）：系统库也 patch，但只 patch open/openat，
++            // 用来定位"谁在读 WebView 内容文件"。graphics/self 仍然跳过（避免崩溃）。
++            if (!ns_open_diag_enabled()) return;
++            if (verdict.reason != nextvm::libfilter::Reason::kSystemLib) return;
++        }
+     }
+ 
+     if (symtab == nullptr || strtab == nullptr) return;
+@@ -1813,6 +1858,10 @@ static void patch_library_got(uintptr_t base_addr, const char* lib_name,
+             // v87: single-symbol pass (CM libDexHelper.so mmap-only)
+             if (only_symbol != nullptr && strcmp(sym_name, only_symbol) != 0)
+                 continue;
++            // 诊断构建：系统库只 patch open/openat（定位 WebView 读取者）
++            if (ns_open_diag_enabled() && strcmp(sym_name, "open") != 0 &&
++                strcmp(sym_name, "openat") != 0)
++                continue;
+ 
+             // Check if this symbol is one we want to hook
+             for (int h = 0; h < g_hook_count; h++) {
+@@ -1846,6 +1895,11 @@ static void patch_library_got(uintptr_t base_addr, const char* lib_name,
+             if (sym_name[0] == '\0') continue;
+             // v87: single-symbol pass (CM libDexHelper.so mmap-only)
+             if (only_symbol != nullptr && strcmp(sym_name, only_symbol) != 0)
++            // 诊断构建：系统库只 patch open/openat（定位 WebView 读取者）
++            if (ns_open_diag_enabled() && strcmp(sym_name, "open") != 0 &&
++                strcmp(sym_name, "openat") != 0)
++                continue;
++
+                 continue;
+ 
+             for (int h = 0; h < g_hook_count; h++) {
+@@ -2539,6 +2593,7 @@ Java_com_nextvm_core_hook_NativeHookBridge_nativeSetProcessName(
+ #include <signal.h>
+ #include <ucontext.h>
+ #include <sys/syscall.h>
++#include <sys/system_properties.h>
+ #include <linux/seccomp.h>
+ #include <linux/filter.h>
+ #include <linux/audit.h>
