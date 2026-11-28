@@ -110,7 +110,12 @@ public final class Report {
 
     public static JSONArray webextEntries() {
         synchronized (WEBEXT) {
-            return new JSONArray(WEBEXT.toString());
+            try {
+                return new JSONArray(WEBEXT.toString());
+            } catch (Throwable t) {
+                Log.w(TAG, "webext copy failed: " + t);
+                return new JSONArray();
+            }
         }
     }
 
@@ -126,7 +131,11 @@ public final class Report {
         } catch (Throwable ignored) {
         }
         synchronized (WEBEXT) {
-            WEBEXT.put(o);
+            try {
+                WEBEXT.put(o);
+            } catch (Throwable t) {
+                Log.w(TAG, "webext put failed: " + t);
+            }
         }
     }
 
