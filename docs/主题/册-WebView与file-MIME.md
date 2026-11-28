@@ -128,10 +128,22 @@
 > 但必须**精确到那个库**（全量 patch 50 个库会让 WebView 加载 8 MB 超时）。
 > 下一步只需拿到 `who=`（库名），白名单就确定了。
 
-**同时暴露的两个待补 patch**（若要"假路径完全可用"）：
+**同时暴露的待补 patch**（若要"假路径完全可用"）：
 
-1. `stat`/`access`/`readlink` 也要一起 patch（否则 `File.exists()`、`getCanonicalPath` 仍看到真实文件系统）；
-2. 翻译规则要覆盖 `/data/user/0/<guest>/` → 沙箱（现在只有 `/sdcard` 族规则）。
+1. **`stat`/`access`/`readlink` 必须与 `open/openat` 一起 patch** —— 否则 `File.exists()`、`getCanonicalPath` 仍看到真实文件系统
+   （`synthpath` 变 `about:blank` 就是这个原因：`open` 被翻译成功，但 `exists()` 走 `stat` 未 patch）；
+2. ~~翻译规则要覆盖 `/data/user/0/<guest>/`~~ —— **这条已不存在**：`PathKinds.kt` 的 `PathKind.DATA_ROOT` 族
+   早就注册了 `hostForms = ["/data/data/<pkg>/", "/data/user/0/<pkg>/"]` → `<instanceDir>`（`sandboxRel = ""`），
+   G3 只需白名单，**不需要新增规则**。
+
+**G3 的最小改动因此确定为**（复用 `PathKinds.rulesFor` + `patch_library_got` 的 `only_symbol` 机制）：
+
+```
+lib_allow  = {读取者库}（等 who 结果）
+sym_allow  = {open, openat, stat, access, readlink}   ← 5 个，不是 27 个
+规则        = 不加（DATA_ROOT 已覆盖 /data/user/0/<guest>/）
+预期        = W-ext-synthpath 从 about:blank → text/html 且能渲染；via 不受影响（白名单只对该库）
+```
 
 ## 二、已证伪的路线（不要再试）
 
