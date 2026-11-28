@@ -8,6 +8,31 @@
 
 ---
 
+## 零、⚠ 2026-11-28 实测：本计划的**前提被推翻**（G3 暂停）
+
+原计划假设"`libwebviewchromium.so` 在容器进程内，所以 patch 它就能拦到 Chromium 的 `open`"。
+实测（不需改容器，纯静态 + maps）证明**不成立**：
+
+| 取证 | 结果 |
+| --- | --- |
+| WebView APK 里的库 | `/product/app/WebViewGoogle64/WebViewGoogle64.apk` 内**只有** `lib/armeabi-v7a/libmonochrome_64.so`（69 307 204 B，**ELF32 / arm**）+ `libcrashpad_handler_trampoline.so`；`lib/arm64-v8a/` **只有 0 字节 `libplaceholder.so`** |
+| 该库的 ELF 属性 | `FLAGS: BIND_NOW`、`FLAGS_1: NOW`、`JMPREL=0x2a0904`、`PLTRELSZ=4168`、`PLTGOT=0x41cb30c`、`GNU_RELRO 0x3f7acf0 len 0x251310` ⇒ GOT 在 RELRO 内（只读，需 mprotect） |
+| **容器进程 maps** | 只有 `/system/lib64/libwebviewchromium_loader.so`、`/system/lib64/libwebviewchromium_plat_support.so`、`[anon:libwebview reservation]` —— **没有 monochrome / chromium** |
+| 设备上的 WebView 进程 | `webview_zygote`（uid 1053）、`com.google.android.webview:webview_service`、`:webview_apk`（uid 10197）——**Chromium 跑在它们自己进程里** |
+| 设备 ABI | `abilist=arm64-v8a`（32 位被隐藏，但存在 `app_process32` + `zygote`）⇒ 32 位 WebView 库可用 |
+
+**结论**：
+1. **GOT patch（进程内重定位）对 Chromium 完全无效** —— 它不在容器进程里，patch 容器进程的任意库都拦不到它；
+2. 同理 **inline hook、seccomp 也只能作用于本进程**，对 WebView 的 `file://` 读取无效；
+3. 之前 `W-ext-*` 实验的 MIME 规律**仍然成立**（那是行为事实），但**"用 GOT 白名单修 WebView"这条路走不通**；
+4. 因此 **G3（对 via 开 WebView 库白名单）暂停**；G1/G2 的价值降级为"通用黑白名单能力"（未来给真正的进程内库用），不再是 WebView 方案的一部分。
+
+**下一步必须先搞清**（见 §九 修订）：`file://` 的**实际读取发生在哪个进程/哪一层**——
+- 若在**容器进程的 Java 层**（`AndroidProtocolHandler` → `FileInputStream` → libc `open`）⇒ 仍可干预（javaIo / GOT），MIME 判定点就是下一步要找的东西；
+- 若在 **WebView 自己的进程**（uid 10197）⇒ 它**没有权限**读容器沙箱（u0_a389），但 W2 实测**读到了内容** ⇒ 反证读取不在那个进程。
+
+（§九 的"需要你确认的 3 点"中，第 1 点"初始 lib_allow 清单"因此作废，见下方修订。）
+
 ## 一、现状调查："系统库"的定义从哪来（这是要改的地方）
 
 **结论：现在没有显式清单，"系统库"是"推定"出来的**，来源有三处：
