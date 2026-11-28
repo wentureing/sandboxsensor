@@ -109,14 +109,29 @@
 - 若读取在 WebView 进程 ⇒ 我们**无法** hook（进程内 hook 跨不过去）⇒ 只能"让路径真实可读"（即 W-ext 结论）；
 - 若读取在容器进程 ⇒ 还有干预余地（GOT 白名单 / javaIo 补齐）。
 
-**一锤定音的手段**（已执行）：容器诊断构建 `bd3f0d3` —— `setprop debug.nextvm.openDiag 1` 后，
-**所有系统库都会 patch `open`/`openat`**，并把路径含 `wvprobe` 的调用（含**调用者库名**）写进
-`files/webview-read.log`。判读：
+**一锤定音（已执行，2026-11-28 10:46）**：容器诊断构建 `bd3f0d3`（`setprop debug.nextvm.openDiag 1` 后，
+**所有系统库都 patch `open`/`openat`**，路径含 `wvprobe` 的调用写进 `files/webview-read.log`）。
 
-| `webview-read.log` | 结论 |
-| --- | --- |
-| 出现 `wvprobe_big.html`/`wvprobe.html` 记录 | **读取在容器进程**，`who=` 就是读取者库 |
-| 完全没有记录 | **读取不在容器进程** ⇒ 只能走"真实可读路径"方案 |
+**结果（决定性）**：
+
+| 观测 | 数据 | 结论 |
+| --- | --- | --- |
+| `hook stats` | **`applied=50 slots=55`**（正常模式是 `applied=0~1`） | 诊断模式确实 patch 了 50 个系统库的 `open/openat` |
+| `webview-read.log` | 21 条记录，`pid=26021`（**容器进程**），含 `wvprobe.html`/`wvprobe_synth.html`/`wvprobe_big.html` 等**全部** W 文件，多数 `err=0` | **读取发生在容器进程、经 libc `open`** ✅ |
+| `W-ext-synthpath` | `about:blank`（`f.exists()=false`） | `open(O_CREAT)` 被翻译成功（`err=0`），但 `File.exists()` 走 `stat`——诊断模式只 patch `open/openat`，**`stat` 没 patch** ⇒ 仍是 false |
+| `W-big` | **`timeout(8s)`** | 全量 patch 50 个库的 `open` ⇒ 每次文件访问都进 `redirect_path` ⇒ **性能灾难**，不可用于生产 |
+| `W2` / `W-ext-nopkg` | `text/plain` / `text/html`（不变） | 与诊断开关无关 |
+
+**因此"guest 假路径 + WebView 真路径"是可行的，缺口被精确定位为**：
+
+> **读取者在容器进程内，走 libc `open`** —— 所以 GOT patch **能**覆盖它；
+> 但必须**精确到那个库**（全量 patch 50 个库会让 WebView 加载 8 MB 超时）。
+> 下一步只需拿到 `who=`（库名），白名单就确定了。
+
+**同时暴露的两个待补 patch**（若要"假路径完全可用"）：
+
+1. `stat`/`access`/`readlink` 也要一起 patch（否则 `File.exists()`、`getCanonicalPath` 仍看到真实文件系统）；
+2. 翻译规则要覆盖 `/data/user/0/<guest>/` → 沙箱（现在只有 `/sdcard` 族规则）。
 
 ## 二、已证伪的路线（不要再试）
 
