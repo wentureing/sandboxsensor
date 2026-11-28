@@ -109,14 +109,8 @@ public final class Report {
     }
 
     public static JSONArray webextEntries() {
-        synchronized (WEBEXT) {
-            try {
-                return new JSONArray(WEBEXT.toString());
-            } catch (Throwable t) {
-                Log.w(TAG, "webext copy failed: " + t);
-                return new JSONArray();
-            }
-        }
+        // 与 timeline()/providerEntries() 同风格：直接返回，序列化交给 payload/flush。
+        return WEBEXT;
     }
 
     /** 供 WebViewProbe 复用：把一条 W 结果写成标准条目（group=webext）。 */
