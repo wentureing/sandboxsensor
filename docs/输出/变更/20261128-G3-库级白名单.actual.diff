@@ -1,0 +1,92 @@
+diff --git a/core/hook/src/main/cpp/native-hook.cpp b/core/hook/src/main/cpp/native-hook.cpp
+index e1f6e50..756aa1e 100644
+--- a/core/hook/src/main/cpp/native-hook.cpp
++++ b/core/hook/src/main/cpp/native-hook.cpp
+@@ -573,6 +573,52 @@ static bool ns_open_diag_enabled() {
+     }
+     return cached != 0;
+ }
++
++// G3 白名单（2026-11-28）：包级 + 库级，pkg 先于 lib。配置走系统属性，逗号分隔：
++//   debug.nextvm.pkgAllow = mark.via,com.sandbox.probe
++//   debug.nextvm.libAllow = libjavacore,libmonochrome_64
++//   debug.nextvm.symAllow = open,openat,stat,access,readlink
++static bool prop_contains(const char* prop, const char* needle) {
++    if (needle == nullptr || needle[0] == '\0') return false;
++    char v[PROP_VALUE_MAX] = {0};
++    __system_property_get(prop, v);
++    if (v[0] == '\0') return false;
++    return strstr(v, needle) != nullptr;
++}
++
++// 命中的库：所属 guest 在 pkgAllow 里，且库名在 libAllow 里 —— 即使被判为系统库也要 patch。
++static bool ns_lib_allow_hit(const char* lib_name) {
++    if (lib_name == nullptr || g_spoofed_package_name.empty()) return false;
++    if (!prop_contains("debug.nextvm.pkgAllow", g_spoofed_package_name.c_str())) return false;
++    return prop_contains("debug.nextvm.libAllow", lib_name);
++}
++
++// 逗号分隔列表的**精确**成员匹配（符号名有前缀包含关系：open ⊂ openat，不能用子串）
++static bool prop_list_exact(const char* prop, const char* needle) {
++    char v[PROP_VALUE_MAX] = {0};
++    __system_property_get(prop, v);
++    if (v[0] == '\0') return false;
++    const size_t n = strlen(needle);
++    const char* p = v;
++    while (*p != '\0') {
++        const char* comma = strchr(p, ',');
++        const size_t len = (comma != nullptr) ? static_cast<size_t>(comma - p) : strlen(p);
++        if (len == n && strncmp(p, needle, n) == 0) return true;
++        if (comma == nullptr) break;
++        p = comma + 1;
++    }
++    return false;
++}
++
++// 白名单库只 patch symAllow 里的符号（默认 5 个），避免把 Chromium/libjavacore 的全部 PLT 都替换掉。
++static bool ns_allow_symbol(const char* sym_name) {
++    if (prop_list_exact("debug.nextvm.symAllow", sym_name)) return true;
++    char v[PROP_VALUE_MAX] = {0};
++    __system_property_get("debug.nextvm.symAllow", v);
++    if (v[0] != '\0') return false;  // 已配置则严格按列表
++    // 未配置 symAllow 时退化为 open/openat（与诊断模式一致）
++    return strcmp(sym_name, "open") == 0 || strcmp(sym_name, "openat") == 0;
++}
+ static void diag_caller(void* ret_addr, char* buf, size_t len);
+ static void wv_read_trace(const char* fn, const char* path, int fd, int err, void* caller_ret) {
+     if (path == nullptr) return;
+@@ -1784,7 +1830,7 @@ static void patch_library_got(uintptr_t base_addr, const char* lib_name,
+         if (verdict.decision == nextvm::libfilter::Decision::kSkip) {
+             // 诊断构建（NS_HOOK_OPEN_DIAG=1）：系统库也 patch，但只 patch open/openat，
+             // 用来定位"谁在读 WebView 内容文件"。graphics/self 仍然跳过（避免崩溃）。
+-            if (!ns_open_diag_enabled()) return;
++            if (!ns_open_diag_enabled() && !ns_lib_allow_hit(lib_name)) return;
+             if (verdict.reason != nextvm::libfilter::Reason::kSystemLib) return;
+         }
+     }
+@@ -1858,9 +1904,9 @@ static void patch_library_got(uintptr_t base_addr, const char* lib_name,
+             // v87: single-symbol pass (CM libDexHelper.so mmap-only)
+             if (only_symbol != nullptr && strcmp(sym_name, only_symbol) != 0)
+                 continue;
+-            // 诊断构建：系统库只 patch open/openat（定位 WebView 读取者）
+-            if (ns_open_diag_enabled() && strcmp(sym_name, "open") != 0 &&
+-                strcmp(sym_name, "openat") != 0)
++            // 受限模式（诊断全量 / G3 白名单）：只 patch 允许的符号
++            if ((ns_open_diag_enabled() || ns_lib_allow_hit(lib_name)) &&
++                !ns_allow_symbol(sym_name))
+                 continue;
+ 
+             // Check if this symbol is one we want to hook
+@@ -1895,9 +1941,9 @@ static void patch_library_got(uintptr_t base_addr, const char* lib_name,
+             if (sym_name[0] == '\0') continue;
+             // v87: single-symbol pass (CM libDexHelper.so mmap-only)
+             if (only_symbol != nullptr && strcmp(sym_name, only_symbol) != 0)
+-            // 诊断构建：系统库只 patch open/openat（定位 WebView 读取者）
+-            if (ns_open_diag_enabled() && strcmp(sym_name, "open") != 0 &&
+-                strcmp(sym_name, "openat") != 0)
++            // 受限模式（诊断全量 / G3 白名单）：只 patch 允许的符号
++            if ((ns_open_diag_enabled() || ns_lib_allow_hit(lib_name)) &&
++                !ns_allow_symbol(sym_name))
+                 continue;
+ 
+                 continue;
