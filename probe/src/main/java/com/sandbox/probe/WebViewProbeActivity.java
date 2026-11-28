@@ -861,9 +861,13 @@ public class WebViewProbeActivity extends Activity {
                 rec(tag + " url=" + url + " -> " + o
                         + (inter > 0 ? "  [intercepted " + inter + "]" : "")
                         + (markW11 ? "  [W11_MODE]" : ""));
+                // T-1：同时写进统一报告的 webext 组（供 CI 比对，不再只留在 txt）
+                Report.putWebExt(tag, "WebView load", o,
+                        !o.startsWith("error") && !o.startsWith("timeout"));
                 main.post(next::run);
             } else if (System.currentTimeMillis() > deadline) {
                 rec(tag + " url=" + url + " -> timeout(8s)");
+                Report.putWebExt(tag, "WebView load", "timeout(8s)", false);
                 main.post(next::run);
             } else {
                 main.postDelayed(poll[0], 200);

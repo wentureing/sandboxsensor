@@ -70,6 +70,7 @@ public final class ProbeRunner {
         probeMount();      // P22-P23  mountinfo
         probeUiEntries();  // P24-P27  uiprobe（PopupWindow / 子窗口，来自 UiProbe）
         probeNative();
+        probeLibAllowApplied();
         probeDiag();
 
         JSONObject root = new JSONObject();
@@ -79,6 +80,7 @@ public final class ProbeRunner {
         root.put("packageName", pkg);
         root.put("timeline", Report.timeline());
         root.put("provider", Report.providerEntries());
+        root.put("webext", Report.webextEntries());
         root.put("entries", sink.entries);
         return root;
     }
@@ -887,6 +889,72 @@ public final class ProbeRunner {
     };
 
     // ------------------------------------------------------------------ native
+
+    /**
+     * T-3：G3 白名单是否真生效。
+     *
+     * 期望来自容器在 bind 时写进本实例 files/lib-allow.json（只写文件、不改行为）；
+     * 实际值取容器 debug 包的 hook stats（guest 同 uid 可读）。
+     * 期望非空而 applied==0 ⇒ 抛异常 ⇒ 该条记 fail。
+     */
+    private void probeLibAllowApplied() {
+        put("H2.lib_allow_applied", "native", "G3 白名单是否真生效（读容器 hook stats）", () -> {
+            File expect = new File(ctx.getFilesDir(), "lib-allow.json");
+            if (!expect.canRead()) {
+                return "SKIPPED (no lib-allow.json)";
+            }
+            String ej = readText(expect, 4096);
+            JSONObject eo = new JSONObject(ej);
+            String libAllow = eo.optString("libAllow", "");
+            if (libAllow.isEmpty()) {
+                return "SKIPPED (libAllow empty)";
+            }
+            File stats = new File("/data/user/0/com.nextvm.app/files/debug-trace.log");
+            if (!stats.canRead()) {
+                return "SKIPPED (container log unreadable)";
+            }
+            String line = lastLineContaining(stats, "hook stats");
+            if (line == null) {
+                return "SKIPPED (no hook stats line)";
+            }
+            int applied = intField(line, "applied");
+            int slots = intField(line, "slots");
+            if (applied <= 0) {
+                throw new IllegalStateException(
+                        "libAllow=" + libAllow + " applied=0 slots=" + slots
+                                + " → 白名单未生效");
+            }
+            return "libAllow=" + libAllow + " applied=" + applied + " slots=" + slots
+                    + " verdict=ok";
+        });
+    }
+
+    /** 读文件尾部 256 KiB，返回最后一条包含 needle 的行。 */
+    private static String lastLineContaining(File f, String needle) {
+        try (java.io.RandomAccessFile raf = new java.io.RandomAccessFile(f, "r")) {
+            long len = raf.length();
+            int cap = (int) Math.min(len, 256 * 1024);
+            byte[] buf = new byte[cap];
+            raf.seek(len - cap);
+            raf.readFully(buf);
+            String[] lines = new String(buf, java.nio.charset.StandardCharsets.UTF_8).split("\n");
+            for (int i = lines.length - 1; i >= 0; i--) {
+                if (lines[i].contains(needle)) {
+                    return lines[i];
+                }
+            }
+        } catch (Throwable ignored) {
+            // 读失败按 SKIPPED 处理
+        }
+        return null;
+    }
+
+    /** 解析 `key=<int>`。 */
+    private static int intField(String line, String key) {
+        java.util.regex.Matcher m =
+                java.util.regex.Pattern.compile(key + "=(\\d+)").matcher(line);
+        return m.find() ? Integer.parseInt(m.group(1)) : -1;
+    }
 
     private void probeNative() {
         String dataDir = "/data/data/" + pkg;

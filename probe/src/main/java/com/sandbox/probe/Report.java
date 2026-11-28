@@ -26,6 +26,8 @@ public final class Report {
     public static final String TAG = "PROBE";
     private static final JSONArray TIMELINE = new JSONArray();
     private static final JSONArray PROVIDER = new JSONArray();
+    /** WebView 实验（W 系列）结果：与 entries 同构，供 CI 直接比对 MIME 等。 */
+    private static final JSONArray WEBEXT = new JSONArray();
 
     private Report() {
     }
@@ -82,6 +84,17 @@ public final class Report {
             Log.w(TAG, "probe fail " + id + " -> " + t);
         }
         synchronized (target) {
+            // T-2：同 id 覆盖（保留最后一次）。早期窗口的那条已在 probe-early.json，
+            // 不会丢证据；这里保证 entries 里每个 id 只有一条，判读不再受"成对出现"干扰。
+            try {
+                for (int i = target.length() - 1; i >= 0; i--) {
+                    JSONObject old = target.optJSONObject(i);
+                    if (old != null && id.equals(old.optString("id"))) {
+                        target.remove(i);
+                    }
+                }
+            } catch (Throwable ignored) {
+            }
             target.put(o);
         }
     }
@@ -93,6 +106,28 @@ public final class Report {
 
     public static JSONArray timeline() {
         return TIMELINE;
+    }
+
+    public static JSONArray webextEntries() {
+        synchronized (WEBEXT) {
+            return new JSONArray(WEBEXT.toString());
+        }
+    }
+
+    /** 供 WebViewProbe 复用：把一条 W 结果写成标准条目（group=webext）。 */
+    static void putWebExt(String id, String name, String value, boolean ok) {
+        JSONObject o = new JSONObject();
+        try {
+            o.put("id", id);
+            o.put("group", "webext");
+            o.put("name", name);
+            o.put("value", value);
+            o.put("status", ok ? "ok" : "fail");
+        } catch (Throwable ignored) {
+        }
+        synchronized (WEBEXT) {
+            WEBEXT.put(o);
+        }
     }
 
     public static JSONArray providerEntries() {

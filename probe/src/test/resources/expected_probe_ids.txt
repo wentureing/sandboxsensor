@@ -1,6 +1,6 @@
 # 探针的固定项集合（每行一个 id，排序）。
 # 增删探针项时必须同步本文件：node tools/lint/check-probe-ids.mjs --write
-# 由 tools/lint/check-probe-ids.mjs 校验；总数 102
+# 由 tools/lint/check-probe-ids.mjs 校验；总数 103
 # 来源：probe/src/main/java（J/P/F/D 等）+ probe/src/main/cpp（N 系列，长名带 .后缀）
 D01
 D02
@@ -22,6 +22,7 @@ F12
 F13
 F14
 H1.dlsym_bypass
+H2.lib_allow_applied
 J01
 J02
 J03
